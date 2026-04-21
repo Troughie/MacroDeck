@@ -1,0 +1,206 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { CheckCircle2, AlertCircle, Info, Loader2, X } from 'lucide-react';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type ToastType = 'success' | 'loading' | 'error' | 'info';
+
+interface NotifData {
+  id: string;
+  type: ToastType;
+  title: string;
+  message?: string;
+  icon?: string;
+  duration?: number;
+}
+
+// ─── Config ───────────────────────────────────────────────────────────────────
+
+const TYPE_CONFIG = {
+  success: { accent: '#22c55e', border: 'rgba(34,197,94,0.3)',  icon: <CheckCircle2 size={16} style={{ color: '#22c55e' }} /> },
+  error:   { accent: '#ef4444', border: 'rgba(239,68,68,0.3)',  icon: <AlertCircle  size={16} style={{ color: '#ef4444' }} /> },
+  info:    { accent: '#3b82f6', border: 'rgba(59,130,246,0.3)', icon: <Info         size={16} style={{ color: '#60a5fa' }} /> },
+  loading: { accent: '#3b82f6', border: 'rgba(59,130,246,0.3)', icon: <Loader2      size={16} style={{ color: '#60a5fa' }} className="animate-spin" /> },
+};
+
+// ─── Single notification ──────────────────────────────────────────────────────
+
+function NotifItem({ notif, onDismiss }: { notif: NotifData; onDismiss: (id: string) => void }) {
+  const cfg = TYPE_CONFIG[notif.type];
+  const [progress, setProgress] = useState(100);
+  const [hovered, setHovered] = useState(false);
+
+  const isCustomIcon = notif.icon && (notif.icon.startsWith('data:') || notif.icon.startsWith('http'));
+
+  useEffect(() => {
+    if (!notif.duration || notif.duration === 0) return;
+    const start = Date.now();
+    const total = notif.duration;
+    let raf: number;
+    const tick = () => {
+      if (hovered) { raf = requestAnimationFrame(tick); return; }
+      const elapsed = Date.now() - start;
+      const pct = Math.max(0, 100 - (elapsed / total) * 100);
+      setProgress(pct);
+      if (pct > 0) raf = requestAnimationFrame(tick);
+      else onDismiss(notif.id);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [notif.duration, notif.id, hovered, onDismiss]);
+
+  // Tell main process to enable mouse events when hovered
+  const handleMouseEnter = () => {
+    setHovered(true);
+    // Enable mouse events on notification window (no forward to other windows)
+    (window as any).electronAPI?._ipc?.send?.('notif:set-interactive', true);
+  };
+  const handleMouseLeave = () => {
+    setHovered(false);
+    // Back to click-through
+    (window as any).electronAPI?._ipc?.send?.('notif:set-interactive', false);
+  };
+
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0, x: 60, scale: 0.92 }}
+      animate={{ opacity: 1, x: 0, scale: 1 }}
+      exit={{ opacity: 0, x: 60, scale: 0.88, transition: { duration: 0.18 } }}
+      transition={{ type: 'spring', stiffness: 480, damping: 32 }}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+      style={{
+        position: 'relative',
+        background: 'rgba(15, 15, 30, 0.92)',
+        backdropFilter: 'blur(20px)',
+        border: `1px solid ${cfg.border}`,
+        borderRadius: 14,
+        overflow: 'hidden',
+        boxShadow: `0 8px 32px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04)`,
+        cursor: notif.type !== 'loading' ? 'pointer' : 'default',
+      }}
+      onClick={() => notif.type !== 'loading' && onDismiss(notif.id)}
+    >
+      {/* Left accent */}
+      <div style={{
+        position: 'absolute', left: 0, top: 0, bottom: 0, width: 3,
+        background: cfg.accent, borderRadius: '14px 0 0 14px',
+      }} />
+
+      {/* Content */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 14px 10px 16px' }}>
+        {/* Icon */}
+        <div style={{ flexShrink: 0, marginTop: 1 }}>
+          {notif.icon ? (
+            isCustomIcon ? (
+              <img src={notif.icon} alt="" style={{ width: 20, height: 20, objectFit: 'contain', borderRadius: 4 }} />
+            ) : (
+              <span style={{ fontSize: 20, lineHeight: 1 }}>{notif.icon}</span>
+            )
+          ) : cfg.icon}
+        </div>
+
+        {/* Text */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{ color: '#f1f5f9', fontSize: 13, fontWeight: 600, lineHeight: 1.3, marginBottom: notif.message ? 3 : 0 }}>
+            {notif.title}
+          </p>
+          {notif.message && (
+            <p style={{ color: '#94a3b8', fontSize: 11, lineHeight: 1.4 }}>{notif.message}</p>
+          )}
+        </div>
+
+        {/* Close / spinner */}
+        {notif.type === 'loading' ? (
+          <Loader2 size={13} style={{ color: '#60a5fa', flexShrink: 0, marginTop: 2 }} className="animate-spin" />
+        ) : (
+          <button
+            onClick={(e) => { e.stopPropagation(); onDismiss(notif.id); }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', padding: 2, flexShrink: 0, marginTop: 1 }}
+            onMouseEnter={e => (e.currentTarget.style.color = '#94a3b8')}
+            onMouseLeave={e => (e.currentTarget.style.color = '#64748b')}
+          >
+            <X size={12} />
+          </button>
+        )}
+      </div>
+
+      {/* Progress bar */}
+      {notif.duration && notif.duration > 0 && (
+        <div style={{ height: 2, margin: '0 14px 8px', background: 'rgba(255,255,255,0.08)', borderRadius: 2, overflow: 'hidden' }}>
+          <div style={{
+            height: '100%', background: cfg.accent, borderRadius: 2,
+            width: `${progress}%`, transition: 'width 0.016s linear',
+          }} />
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+// ─── App ──────────────────────────────────────────────────────────────────────
+
+export function NotificationApp() {
+  const [notifs, setNotifs] = useState<NotifData[]>([]);
+
+  const dismiss = useCallback((id: string) => {
+    setNotifs(prev => prev.filter(n => n.id !== id));
+  }, []);
+
+  useEffect(() => {
+    if (!window.electronAPI) return;
+
+    // Listen for notifications from main process
+    const ipc = (window as any).electronAPI;
+
+    const unsubShow = ipc.notif?.onShow?.((data: NotifData) => {
+      setNotifs(prev => {
+        const exists = prev.find(n => n.id === data.id);
+        if (exists) return prev.map(n => n.id === data.id ? { ...n, ...data } : n);
+        return [...prev, data];
+      });
+    });
+
+    const unsubDismiss = ipc.notif?.onDismiss?.((id: string) => {
+      dismiss(id);
+    });
+
+    const unsubUpdate = ipc.notif?.onUpdate?.((data: { id: string } & Partial<NotifData>) => {
+      const { id, ...updates } = data;
+      setNotifs(prev => prev.map(n => n.id === id ? { ...n, ...updates } : n));
+      // Auto-dismiss after duration if type changed from loading
+      if (updates.type && updates.type !== 'loading' && updates.duration) {
+        setTimeout(() => dismiss(id), updates.duration);
+      }
+    });
+
+    return () => {
+      unsubShow?.();
+      unsubDismiss?.();
+      unsubUpdate?.();
+    };
+  }, [dismiss]);
+
+  return (
+    <div style={{
+      position: 'fixed',
+      bottom: 12,
+      right: 12,
+      left: 12,
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 8,
+      pointerEvents: 'none',
+    }}>
+      <AnimatePresence mode="popLayout">
+        {notifs.map(n => (
+          <div key={n.id} style={{ pointerEvents: 'auto' }}>
+            <NotifItem notif={n} onDismiss={dismiss} />
+          </div>
+        ))}
+      </AnimatePresence>
+    </div>
+  );
+}

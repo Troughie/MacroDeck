@@ -1,0 +1,122 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html, body, #root {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    background-color: #0f0f0f;
+    color: #f1f5f9;
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    user-select: none;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #1a1a2e;
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #3a3a5a;
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #4a4a6a;
+  }
+}
+
+@layer components {
+  .panel {
+    @apply bg-bg-secondary border border-border rounded-xl overflow-hidden;
+  }
+
+  .panel-header {
+    @apply px-4 py-3 border-b border-border flex items-center gap-2;
+  }
+
+  .btn-primary {
+    @apply bg-accent-blue hover:bg-accent-blue-dark text-white font-medium px-4 py-2 rounded-lg 
+           transition-all duration-150 flex items-center gap-2 text-sm;
+  }
+
+  .btn-secondary {
+    @apply bg-bg-card hover:bg-bg-hover text-text-primary border border-border 
+           font-medium px-4 py-2 rounded-lg transition-all duration-150 flex items-center gap-2 text-sm;
+  }
+
+  .btn-ghost {
+    @apply hover:bg-bg-hover text-text-secondary hover:text-text-primary 
+           px-3 py-1.5 rounded-lg transition-all duration-150 flex items-center gap-2 text-sm;
+  }
+
+  .input-field {
+    @apply bg-bg-card border border-border rounded-lg px-3 py-2 text-text-primary 
+           placeholder-text-muted text-sm focus:outline-none focus:border-accent-blue 
+           transition-colors duration-150 w-full;
+  }
+
+  .key-cap {
+    @apply relative flex items-center justify-center rounded-md border border-border 
+           bg-bg-card text-text-secondary font-mono text-xs cursor-pointer
+           transition-all duration-100 select-none;
+  }
+
+  .key-cap:hover {
+    @apply border-border-hover text-text-primary;
+  }
+
+  .key-cap.assigned {
+    @apply border-accent-blue/50 bg-accent-blue/10 text-accent-blue;
+  }
+
+  .key-cap.pressed {
+    @apply border-accent-blue bg-accent-blue-dark text-white;
+    box-shadow: 0 0 16px rgba(59, 130, 246, 0.6);
+  }
+
+  .macro-type-card {
+    @apply flex items-center gap-3 p-3 rounded-lg border border-border bg-bg-card 
+           hover:border-border-hover hover:bg-bg-hover cursor-grab active:cursor-grabbing
+           transition-all duration-150;
+  }
+
+  .drag-overlay {
+    @apply opacity-90 scale-105 shadow-glow-blue-sm;
+  }
+}
+
+/* Titlebar drag region */
+.titlebar-drag {
+  -webkit-app-region: drag;
+}
+
+.titlebar-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* Glow animations */
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(59, 130, 246, 0.4); }
+  50% { box-shadow: 0 0 20px rgba(59, 130, 246, 0.8); }
+}
+
+.glow-animate {
+  animation: glow-pulse 2s ease-in-out infinite;
+}

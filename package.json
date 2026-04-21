@@ -1,0 +1,106 @@
+{
+  "name": "macrodeck",
+  "version": "1.0.0",
+  "description": "Production-ready desktop macro keyboard application",
+  "main": "dist/electron/electron/main.js",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
+    "dev:vite": "vite",
+    "dev:electron": "wait-on http://localhost:5173 && tsc -p tsconfig.electron.json && electron .",
+    "build": "npm run build:vite && npm run build:electron",
+    "build:vite": "vite build",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "dist": "npm run build && electron-builder --config.win.certificateFile='' --config.win.sign=false",
+    "dist:win": "npm run build && electron-builder --win --config.win.certificateFile='' --config.win.sign=false",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "electron",
+    "macro",
+    "keyboard",
+    "streamdeck"
+  ],
+  "author": "MacroDeck",
+  "license": "MIT",
+  "dependencies": {
+    "@dnd-kit/core": "^6.1.0",
+    "@dnd-kit/modifiers": "^9.0.0",
+    "@dnd-kit/sortable": "^8.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@nut-tree-fork/nut-js": "^4.2.1",
+    "electron-store": "^8.1.0",
+    "framer-motion": "^11.0.0",
+    "lucide-react": "^0.344.0",
+    "node-interception": "^2.0.4",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "uiohook-napi": "^1.5.3",
+    "zustand": "^4.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@vitejs/plugin-react": "^4.2.0",
+    "autoprefixer": "^10.4.17",
+    "concurrently": "^8.2.2",
+    "electron": "^29.0.0",
+    "electron-builder": "^24.9.1",
+    "postcss": "^8.4.35",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5.3.3",
+    "vite": "^5.1.0",
+    "vite-plugin-electron": "^0.28.0",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.macrodeck.app",
+    "productName": "MacroDeck",
+    "copyright": "Copyright © 2024 MacroDeck",
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "icon": "assets/icon.ico",
+      "requestedExecutionLevel": "requireAdministrator",
+      "sign": null,
+      "forceCodeSigning": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "MacroDeck",
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico"
+    },
+    "files": [
+      "dist/**/*",
+      "assets/**/*",
+      "!assets/README.md"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/",
+        "to": "resources/",
+        "filter": ["**/*", "!*.md"]
+      },
+      {
+        "from": "electron/native/",
+        "to": "native/",
+        "filter": ["*.cs", "*.ps1"]
+      }
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/node-interception/**/*",
+      "node_modules/uiohook-napi/**/*",
+      "node_modules/@nut-tree-fork/**/*"
+    ],
+    "directories": {
+      "output": "release",
+      "buildResources": "assets"
+    }
+  }
+}
