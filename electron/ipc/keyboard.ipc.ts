@@ -75,8 +75,10 @@ function getKeyboards(): KeyboardDevice[] {
         const hwid: string = kb.getHardwareId() ?? '';
         const vidMatch = hwid.match(/VID_([0-9A-Fa-f]{4})/i);
         const pidMatch = hwid.match(/PID_([0-9A-Fa-f]{4})/i);
+        const miMatch  = hwid.match(/MI_([0-9A-Fa-f]{2})/i);
         const vid = vidMatch ? parseInt(vidMatch[1], 16) : 0;
         const pid = pidMatch ? parseInt(pidMatch[1], 16) : 0;
+        const mi  = miMatch  ? parseInt(miMatch[1],  16) : -1;
         const vidHex = vid.toString(16).toUpperCase().padStart(4, '0');
         const pidHex = pid.toString(16).toUpperCase().padStart(4, '0');
         const deviceKey = `interception:${kb.id}`;
@@ -85,40 +87,111 @@ function getKeyboards(): KeyboardDevice[] {
           name: `Keyboard ${kb.id} (${vidHex}:${pidHex})`,
           vendorId: vid,
           productId: pid,
+          interfaceNumber: mi,   // -1 = single-interface device (no MI_ in hwid)
+          hwid,
           isSelected: deviceKey === selectedDeviceKey,
           isConnected: true,
         };
       });
 
-    // Enrich with PnP friendly names
+    // Enrich with bus-reported device names (exact names from USB descriptor)
+    // Uses DEVPKEY_Device_BusReportedDeviceDesc which is the real device name
+    // reported by the hardware itself, visible under "Human Interface Devices"
     try {
       ensureTmpDir();
       const { execFileSync } = require('child_process');
-      const ps = `Get-PnpDevice -Class Keyboard -ErrorAction SilentlyContinue | Select-Object FriendlyName,HardwareID | ConvertTo-Json -Compress -Depth 3`;
+      // Query HID devices (not just Keyboard class) to get bus-reported names
+      // then fall back to Keyboard class FriendlyName if not found
+      const ps = `
+$result = @()
+$hidDevices = Get-PnpDevice -Class HIDClass -ErrorAction SilentlyContinue
+foreach ($d in $hidDevices) {
+  $hwids = $d.HardwareID
+  if (-not $hwids) { continue }
+  $busName = (Get-PnpDeviceProperty -InputObject $d -KeyName 'DEVPKEY_Device_BusReportedDeviceDesc' -ErrorAction SilentlyContinue).Data
+  $result += [PSCustomObject]@{
+    Name = if ($busName) { $busName } else { $d.FriendlyName }
+    HardwareID = $hwids
+  }
+}
+$kbDevices = Get-PnpDevice -Class Keyboard -ErrorAction SilentlyContinue
+foreach ($d in $kbDevices) {
+  $hwids = $d.HardwareID
+  if (-not $hwids) { continue }
+  $busName = (Get-PnpDeviceProperty -InputObject $d -KeyName 'DEVPKEY_Device_BusReportedDeviceDesc' -ErrorAction SilentlyContinue).Data
+  $result += [PSCustomObject]@{
+    Name = if ($busName) { $busName } else { $d.FriendlyName }
+    HardwareID = $hwids
+  }
+}
+$result | ConvertTo-Json -Compress -Depth 3
+`.trim();
       const scriptPath = path.join(tmpDir, 'pnp.ps1');
       fs.writeFileSync(scriptPath, ps, 'utf8');
       const out = execFileSync('powershell', [
         '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath,
-      ], { timeout: 8000 }).toString().trim();
+      ], { timeout: 12000 }).toString().trim();
       if (out) {
         const raw = JSON.parse(out);
         const pnpList: any[] = Array.isArray(raw) ? raw : [raw];
         devices.forEach(dev => {
           const vidHex = dev.vendorId.toString(16).toUpperCase().padStart(4, '0');
           const pidHex = dev.productId.toString(16).toUpperCase().padStart(4, '0');
-          const match = pnpList.find((p: any) => {
-            const hwids: string[] = Array.isArray(p.HardwareID) ? p.HardwareID : [p.HardwareID ?? ''];
-            return hwids.some((h: string) =>
-              h?.toUpperCase().includes(`VID_${vidHex}`) &&
-              h?.toUpperCase().includes(`PID_${pidHex}`)
-            );
-          });
-          if (match?.FriendlyName) dev.name = match.FriendlyName;
+          const mi = dev.interfaceNumber ?? -1;
+          const miHex = mi >= 0
+            ? mi.toString(16).toUpperCase().padStart(2, '0')
+            : null;
+
+          // Try to match by VID+PID+MI (exact interface match first)
+          let match = miHex
+            ? pnpList.find((p: any) => {
+                const hwids: string[] = Array.isArray(p.HardwareID) ? p.HardwareID : [p.HardwareID ?? ''];
+                return hwids.some((h: string) =>
+                  h?.toUpperCase().includes(`VID_${vidHex}`) &&
+                  h?.toUpperCase().includes(`PID_${pidHex}`) &&
+                  h?.toUpperCase().includes(`MI_${miHex}`)
+                );
+              })
+            : null;
+
+          // Fall back to VID+PID only
+          if (!match) {
+            match = pnpList.find((p: any) => {
+              const hwids: string[] = Array.isArray(p.HardwareID) ? p.HardwareID : [p.HardwareID ?? ''];
+              return hwids.some((h: string) =>
+                h?.toUpperCase().includes(`VID_${vidHex}`) &&
+                h?.toUpperCase().includes(`PID_${pidHex}`)
+              );
+            });
+          }
+
+          if (!match?.Name) return;
+
+          const baseName = match.Name !== 'HID Keyboard Device'
+            ? match.Name
+            : `HID Keyboard Device (${vidHex}:${pidHex})`;
+
+          // Label non-primary interfaces so user knows which one sends keystrokes
+          if (mi > 0) {
+            dev.name = `${baseName} [Interface ${mi}]`;
+          } else {
+            dev.name = baseName;
+          }
         });
       }
     } catch { /* ignore PnP errors */ }
 
-    return devices;
+    // Mark devices that are likely not real keyboards based on their name
+    const NON_KEYBOARD_PATTERN = /mouse|receiver|trackpad|touchpad|trackball|pointer|gamepad|joystick/i;
+    devices.forEach(dev => {
+      dev.isKeyboard = !NON_KEYBOARD_PATTERN.test(dev.name);
+    });
+
+    // Only keep primary keyboard interfaces:
+    // - interfaceNumber === 0 (MI_00 = main keyboard interface)
+    // - interfaceNumber === -1 (no MI_ in hwid = single-interface device)
+    // Filter out secondary interfaces (MI_01, MI_02...) like consumer control, vendor-defined, etc.
+    return devices.filter(dev => (dev.interfaceNumber ?? -1) <= 0);
   } catch (err: any) {
     console.error('[keyboard.ipc] getKeyboards failed:', err.message?.slice(0, 100));
     return [];

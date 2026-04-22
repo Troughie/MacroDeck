@@ -97,6 +97,9 @@ export interface KeyboardDevice {
   name: string;
   vendorId: number;
   productId: number;
+  interfaceNumber?: number;  // HID interface index (-1 = single-interface, 0 = primary keyboard, >0 = secondary)
+  hwid?: string;             // raw hardware ID string from Interception
+  isKeyboard?: boolean;      // false if device name suggests it's not a keyboard (mouse, receiver, etc.)
   isSelected: boolean;
   isConnected: boolean;
 }

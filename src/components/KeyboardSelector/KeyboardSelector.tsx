@@ -44,7 +44,9 @@ export function KeyboardSelector() {
             <span className="text-text-muted text-xs text-center">No keyboards found</span>
           </div>
         ) : (
-          devices.map((device) => (
+          devices
+            .filter((device) => device.isKeyboard !== false)
+            .map((device) => (
             <DeviceCard
               key={device.id}
               device={device}
@@ -114,7 +116,7 @@ function DeviceCard({ device, isSelected, onSelect }: DeviceCardProps) {
           {device.name}
         </p>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 flex-wrap">
           {device.isConnected ? (
             <>
               <div className="w-1.5 h-1.5 rounded-full bg-accent-green" />
@@ -125,6 +127,23 @@ function DeviceCard({ device, isSelected, onSelect }: DeviceCardProps) {
               <div className="w-1.5 h-1.5 rounded-full bg-text-muted" />
               <span className="text-text-muted text-xs">Disconnected</span>
             </>
+          )}
+          {/* Interface badge — helps user pick the right one when a device has multiple HID interfaces */}
+          {device.interfaceNumber !== undefined && device.interfaceNumber >= 0 && (
+            <span className={`
+              text-[10px] px-1.5 py-0.5 rounded font-mono
+              ${device.isKeyboard === false
+                ? 'bg-yellow-500/15 text-yellow-400'
+                : device.interfaceNumber === 0
+                  ? 'bg-accent-green/15 text-accent-green'
+                  : 'bg-text-muted/15 text-text-muted'}
+            `}>
+              {device.isKeyboard === false
+                ? 'Not Keyboard'
+                : device.interfaceNumber === 0
+                  ? 'Keyboard'
+                  : `IF ${device.interfaceNumber}`}
+            </span>
           )}
         </div>
 
@@ -137,7 +156,7 @@ function DeviceCard({ device, isSelected, onSelect }: DeviceCardProps) {
       </div>
 
       {/* Set as macro device button */}
-      {!isSelected && (
+      {device.isKeyboard !== false && !isSelected && (
         <button
           className="mt-2 w-full text-xs text-accent-blue hover:text-accent-blue-glow 
                      border border-accent-blue/30 hover:border-accent-blue/60 
@@ -148,7 +167,7 @@ function DeviceCard({ device, isSelected, onSelect }: DeviceCardProps) {
         </button>
       )}
 
-      {isSelected && (
+      {device.isKeyboard !== false && isSelected && (
         <div className="mt-2 w-full text-xs text-accent-blue text-center 
                         border border-accent-blue/30 rounded-md py-1 bg-accent-blue/5">
           ✓ Active Macro Device
