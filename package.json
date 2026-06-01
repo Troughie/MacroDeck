@@ -59,7 +59,12 @@
     "copyright": "Copyright © 2024 MacroDeck",
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "assets/icon.ico",
       "requestedExecutionLevel": "requireAdministrator",
@@ -84,12 +89,22 @@
       {
         "from": "resources/",
         "to": "resources/",
-        "filter": ["**/*", "!*.md"]
+        "filter": [
+          "**/*",
+          "!*.md"
+        ]
       },
       {
         "from": "electron/native/",
         "to": "native/",
-        "filter": ["*.cs", "*.ps1"]
+        "filter": [
+          "*.cs",
+          "*.ps1"
+        ]
+      },
+      {
+        "from": "Interception/command line installer/install-interception.exe",
+        "to": "resources/install-interception.exe"
       }
     ],
     "asar": true,

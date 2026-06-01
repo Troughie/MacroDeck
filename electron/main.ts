@@ -1,12 +1,13 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, shell, dialog } from 'electron';
 import path from 'path';
+import fs from 'fs';
 import Store from 'electron-store';
 import { StoreSchema, AppSettings } from '../src/types/macro.types';
 import { registerKeyboardIpc } from './ipc/keyboard.ipc';
 import { registerAppsIpc } from './ipc/apps.ipc';
 import { registerAudioIpc } from './ipc/audio.ipc';
 import { registerMacroIpc } from './ipc/macro.ipc';
-import { registerSystemIpc } from './ipc/system.ipc';
+import { registerSystemIpc, setWindowsStartup } from './ipc/system.ipc';
 import { ensureAppVolumeExe } from './native/appvolume';
 import { createNotificationWindow, registerNotificationIpc } from './notification-window';
 
@@ -124,17 +125,13 @@ function updateTrayMenu(): void {
       label: 'Run on Startup',
       type: 'checkbox',
       checked: settings.runOnStartup,
-      click: (item) => {
-        if (app.isPackaged) {
-          app.setLoginItemSettings({
-            openAtLogin: item.checked,
-            openAsHidden: settings.startMinimized,
-            path: process.execPath,
-            args: [],
-          });
+      click: async (item) => {
+        // Use Windows Registry via PowerShell (works with admin requirement)
+        const result = await setWindowsStartup(item.checked);
+        if (result) {
+          store.set('settings.runOnStartup', item.checked);
+          updateTrayMenu();
         }
-        store.set('settings.runOnStartup', item.checked);
-        updateTrayMenu();
       },
     },
     {
@@ -224,6 +221,24 @@ function registerWindowIpc(): void {
 // ─── App Lifecycle ────────────────────────────────────────────────────────────
 
 app.whenReady().then(() => {
+  // Check if Interception installation requires restart
+  const restartFlagPath = path.join(process.env.LOCALAPPDATA || '', 'MacroDeck', 'need-restart-for-interception.flag');
+  if (fs.existsSync(restartFlagPath)) {
+    // Show dialog and exit
+    dialog.showErrorBox(
+      'Cần khởi động lại máy',
+      'Interception Driver đã được cài đặt thành công!\n\nMáy tính cần khởi động lại để driver hoạt động.\n\nVui lòng khởi động lại máy và chạy MacroDeck lại.'
+    );
+    // Clean up flag file
+    try {
+      fs.unlinkSync(restartFlagPath);
+    } catch (e) {
+      console.error('[main] Failed to remove restart flag:', e);
+    }
+    app.quit();
+    return;
+  }
+
   // Pre-compile AppVolume.exe in background
   setTimeout(() => {
     try { ensureAppVolumeExe(); } catch (e) { console.error('[main] AppVolume compile failed:', e); }
