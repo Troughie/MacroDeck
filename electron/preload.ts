@@ -72,6 +72,8 @@ const electronAPI = {
       ipcRenderer.invoke('system:setStartup', enabled),
     getStartup: (): Promise<boolean> =>
       ipcRenderer.invoke('system:getStartup'),
+    uninstallInterception: (): Promise<boolean> =>
+      ipcRenderer.invoke('system:uninstallInterception'),
     hideWindow: (): Promise<void> =>
       ipcRenderer.invoke('system:hideWindow'),
     showWindow: (): Promise<void> =>

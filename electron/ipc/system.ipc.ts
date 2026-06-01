@@ -57,6 +57,28 @@ export async function getWindowsStartup(): Promise<boolean> {
   }
 }
 
+export async function uninstallInterceptionDriver(): Promise<boolean> {
+  try {
+    // Check if Interception installer exists in resources
+    const interceptionInstallerPath = path.join(__dirname, '../../../resources/install-interception.exe');
+    
+    // Run uninstall command
+    const psCommand = `"${interceptionInstallerPath}" /uninstall`;
+    
+    try {
+      await execFileAsync('powershell.exe', ['-Command', psCommand]);
+      console.log('[system] Interception driver uninstall initiated');
+      return true;
+    } catch (err) {
+      console.error('[system] Failed to uninstall Interception driver:', err);
+      return false;
+    }
+  } catch (err) {
+    console.error('[system] uninstallInterceptionDriver failed:', err);
+    return false;
+  }
+}
+
 // ─── IPC Handlers ─────────────────────────────────────────────────────────
 
 export function registerSystemIpc(
@@ -93,6 +115,15 @@ export function registerSystemIpc(
       return await getWindowsStartup();
     } catch (err) {
       console.log('[system.ipc] getStartup failed:', err);
+      return false;
+    }
+  });
+
+  ipcMain.handle('system:uninstallInterception', async (): Promise<boolean> => {
+    try {
+      return await uninstallInterceptionDriver();
+    } catch (err) {
+      console.error('[system.ipc] uninstallInterception failed:', err);
       return false;
     }
   });

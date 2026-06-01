@@ -36,12 +36,19 @@ Biến bất kỳ bàn phím nào thành macro keyboard chuyên dụng — tươ
 
 ## Cài đặt
 
-### Bước 1: Cài Interception Driver (BẮT BUỘC)
+### Bước 1: Cài Interception Driver (TỰ ĐỘNG)
 
 MacroDeck dùng [Interception driver](https://github.com/oblitum/Interception) để phân biệt input từ từng bàn phím riêng biệt và suppress keystroke.
 
 **Cách cài:**
 
+**Tự động (khuyến nghị):**
+- Chạy installer `MacroDeck-Setup-1.0.0.exe`
+- Installer sẽ **tự động cài Interception driver** khi cài MacroDeck
+- Thực hiện theo hướng dẫn trên màn hình
+- **Khởi động lại máy tính** khi yêu cầu
+
+**Thủ công (nếu cần):**
 1. Download installer từ: https://github.com/oblitum/Interception/releases
 2. Giải nén, mở **Command Prompt as Administrator**
 3. Chạy:
@@ -50,7 +57,11 @@ MacroDeck dùng [Interception driver](https://github.com/oblitum/Interception) �
    ```
 4. **Restart máy tính**
 
-> ⚠️ Nếu không cài driver này, MacroDeck vẫn chạy nhưng không thể phân biệt bàn phím và không thể suppress keystroke.
+> ⚠️ **Lưu ý quan trọng:** Một số game hoặc anti-cheat software có thể nghi Interception driver là phần mềm gian lận và sẽ block input hoặc tắt máy. Nếu xảy ra vấn đề này, bạn có thể gỡ driver tại **Settings → Gỡ Interception Driver** (trong MacroDeck) hoặc gỡ thủ công bằng cách chạy:
+> ```cmd
+> install-interception.exe /uninstall
+> ```
+> Sau đó khởi động lại máy để khôi phục cài đặt.
 
 ### Bước 2: Cài MacroDeck
 
