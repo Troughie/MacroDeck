@@ -1,5 +1,7 @@
 import React, { useEffect, useCallback } from 'react';
-import { DndContext, DragEndEvent, DragOverlay, DragStartEvent, useSensor, useSensors, PointerSensor } from '@dnd-kit/core';
+import { DndContext, DragEndEvent, DragOverlay, DragStartEvent, useSensor, useSensors, PointerSensor, pointerWithin } from '@dnd-kit/core';
+import { snapCenterToCursor } from '@dnd-kit/modifiers';
+
 import { motion, AnimatePresence } from 'framer-motion';
 
 import { TitleBar } from './components/TitleBar/TitleBar';
@@ -108,7 +110,7 @@ export default function App() {
     <div className="flex flex-col h-screen bg-bg-primary overflow-hidden">
       <TitleBar />
 
-      <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+      <DndContext sensors={sensors} collisionDetection={pointerWithin} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
         {/* Profile bar */}
         <div className="flex items-center gap-2 px-3 py-1.5 bg-bg-secondary border-b border-border flex-shrink-0">
           <span className="text-text-muted text-xs">Profile:</span>
@@ -146,7 +148,7 @@ export default function App() {
           </div>
         </div>
 
-        <DragOverlay dropAnimation={null}>
+        <DragOverlay dropAnimation={null} modifiers={[snapCenterToCursor]}>
           {activeDragInfo && (
             <div style={{
               width: 8, height: 8, borderRadius: '50%',
