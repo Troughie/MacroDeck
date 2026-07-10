@@ -1,4 +1,5 @@
-import { usb, findByIds, Interface, InEndpoint, Endpoint } from 'usb';
+import { usb, findByIds, Interface, InEndpoint } from 'usb';
+import type { Endpoint } from 'usb';
 import { diffBootReports, KeyDelta } from './boot-report';
 
 export interface KeyboardReader {
@@ -8,6 +9,8 @@ export interface KeyboardReader {
 // Opens a keyboard already bound to WinUSB and streams key deltas.
 // Throws if the device is missing or no interrupt IN endpoint can be claimed
 // (typically because the device is not WinUSB-bound yet).
+// If claim succeeds for some interfaces but a later interface's setup fails,
+// onError is called for that interface and polling continues on the rest.
 export function openKeyboardReader(
   vendorId: number,
   productId: number,
@@ -61,15 +64,15 @@ export function openKeyboardReader(
   }
 
   if (polling.length === 0) {
+    for (const iface of claimed) {
+      try { iface.release(true, () => { /* ignore */ }); } catch { /* ignore */ }
+    }
     try { device.close(); } catch { /* ignore */ }
     throw new Error('No interrupt IN endpoint claimed - is the device WinUSB-bound?');
   }
 
   return {
     close() {
-      for (const ep of polling) {
-        try { ep.stopPoll(); } catch { /* ignore */ }
-      }
       for (const iface of claimed) {
         try { iface.release(true, () => { /* ignore */ }); } catch { /* ignore */ }
       }
