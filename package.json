@@ -31,10 +31,10 @@
     "electron-store": "^8.1.0",
     "framer-motion": "^11.0.0",
     "lucide-react": "^0.344.0",
-    "node-interception": "^2.0.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "uiohook-napi": "^1.5.3",
+    "usb": "^2.18.0",
     "zustand": "^4.5.0"
   },
   "devDependencies": {
@@ -67,7 +67,7 @@
         }
       ],
       "icon": "assets/icon.ico",
-      "requestedExecutionLevel": "requireAdministrator",
+      "requestedExecutionLevel": "asInvoker",
       "sign": null,
       "forceCodeSigning": false
     },
@@ -101,15 +101,10 @@
           "*.cs",
           "*.ps1"
         ]
-      },
-      {
-        "from": "Interception/command line installer/install-interception.exe",
-        "to": "resources/install-interception.exe"
       }
     ],
     "asar": true,
     "asarUnpack": [
-      "node_modules/node-interception/**/*",
       "node_modules/uiohook-napi/**/*",
       "node_modules/@nut-tree-fork/**/*"
     ],

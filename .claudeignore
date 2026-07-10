@@ -1,0 +1,6 @@
+/release
+/node_modules
+/dist
+/assets
+BUILD.md
+build.ps1

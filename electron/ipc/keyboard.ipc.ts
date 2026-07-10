@@ -1,322 +1,407 @@
 import { ipcMain, BrowserWindow } from 'electron';
-import path from 'path';
-import fs from 'fs';
-import os from 'os';
+import { ChildProcessWithoutNullStreams, execFile } from 'child_process';
+import { promisify } from 'util';
 import { KeyboardDevice, KeyEvent } from '../../src/types/macro.types';
+import { RawInputHostMessage, startRawInputHost } from '../native/rawinput';
 
-// ─── State ────────────────────────────────────────────────────────────────────
+const execFileAsync = promisify(execFile);
 
 let selectedDeviceKey = '';
 let mainWindowRef: BrowserWindow | null = null;
-let ic: any = null;
-let listenerActive = false;
+let rawInputHost: ChildProcessWithoutNullStreams | null = null;
+let rawInputStarting = false;
+let hookInstalled = false;
+let rawDevices: KeyboardDevice[] = [];
+let devices: KeyboardDevice[] = [];
 
-const tmpDir = path.join(os.tmpdir(), 'macrodeck');
-function ensureTmpDir() {
-  if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+const assignedKeyCodes = new Set<string>();
+const pendingDeviceResolvers = new Set<() => void>();
+
+interface PnpDeviceInfo {
+  name: string;
+  instanceId: string;
+  hardwareIds: string[];
+  className: string;
 }
 
-// ─── Scan code → KeyboardEvent.code ──────────────────────────────────────────
+let pnpCache: { loadedAt: number; devices: PnpDeviceInfo[] } | null = null;
+const registryNameCache = new Map<string, string | null>();
 
-const SCAN_TO_CODE: Record<number, string> = {
-  1:'Escape',2:'Digit1',3:'Digit2',4:'Digit3',5:'Digit4',6:'Digit5',
-  7:'Digit6',8:'Digit7',9:'Digit8',10:'Digit9',11:'Digit0',
-  12:'Minus',13:'Equal',14:'Backspace',15:'Tab',
-  16:'KeyQ',17:'KeyW',18:'KeyE',19:'KeyR',20:'KeyT',
-  21:'KeyY',22:'KeyU',23:'KeyI',24:'KeyO',25:'KeyP',
-  26:'BracketLeft',27:'BracketRight',28:'Enter',29:'ControlLeft',
-  30:'KeyA',31:'KeyS',32:'KeyD',33:'KeyF',34:'KeyG',
-  35:'KeyH',36:'KeyJ',37:'KeyK',38:'KeyL',
-  39:'Semicolon',40:'Quote',41:'Backquote',42:'ShiftLeft',43:'Backslash',
-  44:'KeyZ',45:'KeyX',46:'KeyC',47:'KeyV',48:'KeyB',
-  49:'KeyN',50:'KeyM',51:'Comma',52:'Period',53:'Slash',
-  54:'ShiftRight',55:'NumpadMultiply',56:'AltLeft',57:'Space',58:'CapsLock',
-  59:'F1',60:'F2',61:'F3',62:'F4',63:'F5',64:'F6',
-  65:'F7',66:'F8',67:'F9',68:'F10',69:'NumLock',70:'ScrollLock',
-  71:'Numpad7',72:'Numpad8',73:'Numpad9',74:'NumpadSubtract',
-  75:'Numpad4',76:'Numpad5',77:'Numpad6',78:'NumpadAdd',
-  79:'Numpad1',80:'Numpad2',81:'Numpad3',82:'Numpad0',83:'NumpadDecimal',
-  87:'F11',88:'F12',
-};
-
-const SCAN_EXT: Record<number, string> = {
-  28:'NumpadEnter',29:'ControlRight',53:'NumpadDivide',56:'AltRight',
-  71:'Home',72:'ArrowUp',73:'PageUp',75:'ArrowLeft',77:'ArrowRight',
-  79:'End',80:'ArrowDown',81:'PageDown',82:'Insert',83:'Delete',
-  91:'MetaLeft',92:'MetaRight',93:'ContextMenu',
-};
-
-function strokeToCode(stroke: any): string {
-  const scanCode: number = stroke.code ?? 0;
-  const state: number = stroke.state ?? 0;
-  const isExt = (state & 0x02) !== 0;
-  if (isExt && SCAN_EXT[scanCode]) return SCAN_EXT[scanCode];
-  return SCAN_TO_CODE[scanCode] ?? `SC${scanCode}`;
+function resolveDeviceWaiters(): void {
+  pendingDeviceResolvers.forEach(resolve => resolve());
+  pendingDeviceResolvers.clear();
 }
 
-function strokeIsUp(stroke: any): boolean {
-  // Interception KeyState: KEY_DOWN=0, KEY_UP=1, KEY_E0=2, KEY_E1=4
-  return (stroke.state & 0x01) !== 0;
+function normalizeDevices(rawDevices: any[] = []): KeyboardDevice[] {
+  return rawDevices.map((device: any) => ({
+    id: String(device.id ?? ''),
+    name: String(device.name ?? 'Input Device'),
+    deviceType: (device.deviceType === 'mouse' ? 'mouse' : 'keyboard') as 'keyboard' | 'mouse',
+    vendorId: Number(device.vendorId ?? 0),
+    productId: Number(device.productId ?? 0),
+    interfaceNumber: Number(device.interfaceNumber ?? -1),
+    hwid: String(device.hwid ?? ''),
+    rawDeviceHandle: device.rawDeviceHandle ? String(device.rawDeviceHandle) : undefined,
+    isKeyboard: device.deviceType === 'mouse' ? false : device.isKeyboard !== false,
+    isConnected: device.isConnected !== false,
+    isSelected: String(device.id ?? '') === selectedDeviceKey,
+  })).filter(device => device.id.length > 0);
 }
 
-// ─── Enumerate keyboards ──────────────────────────────────────────────────────
+function normalizeInstanceId(value: string): string {
+  return value.replace(/^\\\\\?\\/, '').replace(/#\{[^}]+\}$/i, '').replace(/#/g, '\\').toUpperCase();
+}
 
-function getKeyboards(): KeyboardDevice[] {
-  let tempIc: any = null;
-  try {
-    const { Interception, FilterKeyState } = require('node-interception');
-    tempIc = new Interception();
-    tempIc.setFilter('keyboard', FilterKeyState.ALL);
-    const keyboards: any[] = tempIc.getKeyboards();
+function isGenericDeviceName(name: string): boolean {
+  return /^(hid keyboard device|hid-compliant mouse|usb input device|keyboard device|usb composite device)$/i.test(name.trim());
+}
 
-    const devices: KeyboardDevice[] = keyboards
-      .filter((kb: any) => !kb.isInvalid())
-      .map((kb: any) => {
-        const hwid: string = kb.getHardwareId() ?? '';
-        const vidMatch = hwid.match(/VID_([0-9A-Fa-f]{4})/i);
-        const pidMatch = hwid.match(/PID_([0-9A-Fa-f]{4})/i);
-        const miMatch  = hwid.match(/MI_([0-9A-Fa-f]{2})/i);
-        const vid = vidMatch ? parseInt(vidMatch[1], 16) : 0;
-        const pid = pidMatch ? parseInt(pidMatch[1], 16) : 0;
-        const mi  = miMatch  ? parseInt(miMatch[1],  16) : -1;
-        const vidHex = vid.toString(16).toUpperCase().padStart(4, '0');
-        const pidHex = pid.toString(16).toUpperCase().padStart(4, '0');
-        const deviceKey = `interception:${kb.id}`;
-        return {
-          id: deviceKey,
-          name: `Keyboard ${kb.id} (${vidHex}:${pidHex})`,
-          vendorId: vid,
-          productId: pid,
-          interfaceNumber: mi,   // -1 = single-interface device (no MI_ in hwid)
-          hwid,
-          isSelected: deviceKey === selectedDeviceKey,
-          isConnected: true,
-        };
-      });
+function formatVidPid(device: KeyboardDevice): string {
+  const vid = device.vendorId.toString(16).padStart(4, '0').toUpperCase();
+  const pid = device.productId.toString(16).padStart(4, '0').toUpperCase();
+  return `${vid}:${pid}`;
+}
 
-    // Enrich with bus-reported device names (exact names from USB descriptor)
-    // Uses DEVPKEY_Device_BusReportedDeviceDesc which is the real device name
-    // reported by the hardware itself, visible under "Human Interface Devices"
-    try {
-      ensureTmpDir();
-      const { execFileSync } = require('child_process');
-      // Query HID devices (not just Keyboard class) to get bus-reported names
-      // then fall back to Keyboard class FriendlyName if not found
-      const ps = `
+function stripInterfaceSuffix(name: string): string {
+  return name.replace(/\s+\[Interface\s+\d+\]$/i, '').trim();
+}
+
+function physicalGroupKey(device: KeyboardDevice): string {
+  if (device.vendorId > 0 && device.productId > 0) {
+    return `${device.vendorId.toString(16).padStart(4, '0').toUpperCase()}:${
+      device.productId.toString(16).padStart(4, '0').toUpperCase()
+    }`;
+  }
+
+  const normalized = (device.hwid ?? '')
+    .replace(/^\\\\\?\\/, '')
+    .replace(/#\{[^}]+\}$/i, '');
+  const parts = normalized.split('#');
+  if (parts.length >= 2) return `${parts[0]}#${parts[1]}`.toUpperCase();
+  return device.id;
+}
+
+function endpointScore(device: KeyboardDevice): number {
+  let score = device.deviceType === 'keyboard' ? 1000 : 100;
+  const iface = device.interfaceNumber ?? -1;
+  if (iface === 0) score += 100;
+  else if (iface < 0) score += 80;
+  else score -= iface;
+
+  const hwid = (device.hwid ?? '').toUpperCase();
+  if (hwid.includes('&COL01')) score += 20;
+  if (/&COL0[3-9]/.test(hwid)) score -= 30;
+  return score;
+}
+
+function groupInputDevices(inputDevices: KeyboardDevice[]): KeyboardDevice[] {
+  const groups = new Map<string, KeyboardDevice[]>();
+  for (const device of inputDevices) {
+    const key = physicalGroupKey(device);
+    const group = groups.get(key) ?? [];
+    group.push(device);
+    groups.set(key, group);
+  }
+
+  return Array.from(groups.values()).map(group => {
+    const keyboardEndpoints = group
+      .filter(device => device.deviceType === 'keyboard' && device.isKeyboard !== false)
+      .sort((a, b) => endpointScore(b) - endpointScore(a));
+    const mouseEndpoints = group
+      .filter(device => device.deviceType === 'mouse')
+      .sort((a, b) => endpointScore(b) - endpointScore(a));
+    const selectedEndpoint = keyboardEndpoints[0] ?? mouseEndpoints[0] ?? group[0];
+    const hasKeyboard = keyboardEndpoints.length > 0;
+    const hasMouse = mouseEndpoints.length > 0;
+    const tags = [
+      ...(hasKeyboard ? ['keyboard' as const] : []),
+      ...(hasMouse ? ['mouse' as const] : []),
+    ];
+
+    return {
+      ...selectedEndpoint,
+      name: stripInterfaceSuffix(selectedEndpoint.name),
+      deviceType: hasKeyboard ? 'keyboard' : 'mouse',
+      inputTags: tags,
+      isKeyboard: hasKeyboard,
+      interfaceNumber: undefined,
+      isSelected: selectedEndpoint.id === selectedDeviceKey,
+    } as KeyboardDevice;
+  }).sort((a, b) => {
+    const aKeyboard = a.isKeyboard !== false ? 0 : 1;
+    const bKeyboard = b.isKeyboard !== false ? 0 : 1;
+    if (aKeyboard !== bKeyboard) return aKeyboard - bKeyboard;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+async function loadPnpDevices(force = false): Promise<PnpDeviceInfo[]> {
+  const now = Date.now();
+  if (!force && pnpCache && now - pnpCache.loadedAt < 10000) return pnpCache.devices;
+
+  const script = `
 $result = @()
-$hidDevices = Get-PnpDevice -Class HIDClass -ErrorAction SilentlyContinue
-foreach ($d in $hidDevices) {
-  $hwids = $d.HardwareID
-  if (-not $hwids) { continue }
-  $busName = (Get-PnpDeviceProperty -InputObject $d -KeyName 'DEVPKEY_Device_BusReportedDeviceDesc' -ErrorAction SilentlyContinue).Data
-  $result += [PSCustomObject]@{
-    Name = if ($busName) { $busName } else { $d.FriendlyName }
-    HardwareID = $hwids
+$classes = @('HIDClass', 'Keyboard', 'Mouse')
+foreach ($class in $classes) {
+  $items = Get-PnpDevice -Class $class -ErrorAction SilentlyContinue
+  foreach ($d in $items) {
+    $busName = (Get-PnpDeviceProperty -InputObject $d -KeyName 'DEVPKEY_Device_BusReportedDeviceDesc' -ErrorAction SilentlyContinue).Data
+    $friendlyName = $d.FriendlyName
+    $hardwareIds = (Get-PnpDeviceProperty -InputObject $d -KeyName 'DEVPKEY_Device_HardwareIds' -ErrorAction SilentlyContinue).Data
+    $result += [PSCustomObject]@{
+      Name = if ($busName) { $busName } elseif ($friendlyName) { $friendlyName } else { $d.Name }
+      InstanceId = $d.InstanceId
+      HardwareIds = @($hardwareIds)
+      ClassName = $class
+    }
   }
 }
-$kbDevices = Get-PnpDevice -Class Keyboard -ErrorAction SilentlyContinue
-foreach ($d in $kbDevices) {
-  $hwids = $d.HardwareID
-  if (-not $hwids) { continue }
-  $busName = (Get-PnpDeviceProperty -InputObject $d -KeyName 'DEVPKEY_Device_BusReportedDeviceDesc' -ErrorAction SilentlyContinue).Data
-  $result += [PSCustomObject]@{
-    Name = if ($busName) { $busName } else { $d.FriendlyName }
-    HardwareID = $hwids
-  }
-}
-$result | ConvertTo-Json -Compress -Depth 3
+$result | ConvertTo-Json -Compress -Depth 4
 `.trim();
-      const scriptPath = path.join(tmpDir, 'pnp.ps1');
-      fs.writeFileSync(scriptPath, ps, 'utf8');
-      const out = execFileSync('powershell', [
-        '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath,
-      ], { timeout: 12000 }).toString().trim();
-      if (out) {
-        const raw = JSON.parse(out);
-        const pnpList: any[] = Array.isArray(raw) ? raw : [raw];
-        devices.forEach(dev => {
-          const vidHex = dev.vendorId.toString(16).toUpperCase().padStart(4, '0');
-          const pidHex = dev.productId.toString(16).toUpperCase().padStart(4, '0');
-          const mi = dev.interfaceNumber ?? -1;
-          const miHex = mi >= 0
-            ? mi.toString(16).toUpperCase().padStart(2, '0')
-            : null;
 
-          // Try to match by VID+PID+MI (exact interface match first)
-          let match = miHex
-            ? pnpList.find((p: any) => {
-                const hwids: string[] = Array.isArray(p.HardwareID) ? p.HardwareID : [p.HardwareID ?? ''];
-                return hwids.some((h: string) =>
-                  h?.toUpperCase().includes(`VID_${vidHex}`) &&
-                  h?.toUpperCase().includes(`PID_${pidHex}`) &&
-                  h?.toUpperCase().includes(`MI_${miHex}`)
-                );
-              })
-            : null;
+  try {
+    const { stdout } = await execFileAsync('powershell.exe', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-Command',
+      script,
+    ], { timeout: 12000, windowsHide: true, maxBuffer: 1024 * 1024 });
 
-          // Fall back to VID+PID only
-          if (!match) {
-            match = pnpList.find((p: any) => {
-              const hwids: string[] = Array.isArray(p.HardwareID) ? p.HardwareID : [p.HardwareID ?? ''];
-              return hwids.some((h: string) =>
-                h?.toUpperCase().includes(`VID_${vidHex}`) &&
-                h?.toUpperCase().includes(`PID_${pidHex}`)
-              );
-            });
-          }
+    const text = stdout.trim();
+    if (!text) return [];
+    const parsed = JSON.parse(text);
+    const rows = Array.isArray(parsed) ? parsed : [parsed];
+    const mapped = rows.map((row: any) => ({
+      name: String(row.Name ?? ''),
+      instanceId: String(row.InstanceId ?? '').toUpperCase(),
+      hardwareIds: (Array.isArray(row.HardwareIds) ? row.HardwareIds : [row.HardwareIds])
+        .filter(Boolean)
+        .map((id: any) => String(id).toUpperCase()),
+      className: String(row.ClassName ?? ''),
+    })).filter((row: PnpDeviceInfo) => row.instanceId.length > 0);
+    pnpCache = { loadedAt: now, devices: mapped };
+    return mapped;
+  } catch (err: any) {
+    console.warn('[keyboard.ipc] PnP device name lookup failed:', err.message?.slice(0, 100));
+    return pnpCache?.devices ?? [];
+  }
+}
 
-          if (!match?.Name) return;
+function findPnpMatch(device: KeyboardDevice, pnpDevices: PnpDeviceInfo[]): PnpDeviceInfo | undefined {
+  const instanceId = normalizeInstanceId(device.hwid ?? '');
+  if (instanceId) {
+    const exact = pnpDevices.find(pnp => pnp.instanceId === instanceId);
+    if (exact) return exact;
+  }
 
-          const baseName = match.Name !== 'HID Keyboard Device'
-            ? match.Name
-            : `HID Keyboard Device (${vidHex}:${pidHex})`;
+  const vid = device.vendorId > 0 ? `VID_${device.vendorId.toString(16).padStart(4, '0').toUpperCase()}` : '';
+  const pid = device.productId > 0 ? `PID_${device.productId.toString(16).padStart(4, '0').toUpperCase()}` : '';
+  const mi = (device.interfaceNumber ?? -1) >= 0
+    ? `MI_${(device.interfaceNumber ?? -1).toString(16).padStart(2, '0').toUpperCase()}`
+    : '';
 
-          // Label non-primary interfaces so user knows which one sends keystrokes
-          if (mi > 0) {
-            dev.name = `${baseName} [Interface ${mi}]`;
-          } else {
-            dev.name = baseName;
-          }
-        });
-      }
-    } catch { /* ignore PnP errors */ }
+  if (!vid || !pid) return undefined;
 
-    // Mark devices that are likely not real keyboards based on their name
-    const NON_KEYBOARD_PATTERN = /mouse|receiver|trackpad|touchpad|trackball|pointer|gamepad|joystick/i;
-    devices.forEach(dev => {
-      dev.isKeyboard = !NON_KEYBOARD_PATTERN.test(dev.name);
+  const matchesIdentity = (value: string) =>
+    value.includes(vid) && value.includes(pid) && (!mi || value.includes(mi));
+
+  return pnpDevices.find(pnp =>
+    matchesIdentity(pnp.instanceId) || pnp.hardwareIds.some(matchesIdentity)
+  );
+}
+
+function cleanWindowsDeviceName(value: string): string {
+  const trimmed = value.trim();
+  const semicolon = trimmed.lastIndexOf(';');
+  return semicolon >= 0 ? trimmed.slice(semicolon + 1).trim() : trimmed;
+}
+
+function enumRegistryKeyFromRawHwid(hwid: string): string | null {
+  const normalized = hwid
+    .replace(/^\\\\\?\\/, '')
+    .replace(/#\{[^}]+\}$/i, '');
+  const parts = normalized.split('#');
+  if (parts.length < 3) return null;
+  return `HKLM\\SYSTEM\\CurrentControlSet\\Enum\\${parts[0]}\\${parts[1]}\\${parts[2]}`;
+}
+
+async function lookupRegistryDeviceName(hwid: string): Promise<string | null> {
+  const key = enumRegistryKeyFromRawHwid(hwid);
+  if (!key) return null;
+  if (registryNameCache.has(key)) return registryNameCache.get(key) ?? null;
+
+  try {
+    const { stdout } = await execFileAsync('reg.exe', ['query', key], {
+      timeout: 3000,
+      windowsHide: true,
+      maxBuffer: 128 * 1024,
     });
+    const lines = stdout.split(/\r?\n/);
+    const values: Record<string, string> = {};
+    for (const line of lines) {
+      const match = line.match(/^\s+(\S+)\s+REG_\S+\s+(.+)$/);
+      if (match) values[match[1]] = cleanWindowsDeviceName(match[2]);
+    }
 
-    // Only keep primary keyboard interfaces:
-    // - interfaceNumber === 0 (MI_00 = main keyboard interface)
-    // - interfaceNumber === -1 (no MI_ in hwid = single-interface device)
-    // Filter out secondary interfaces (MI_01, MI_02...) like consumer control, vendor-defined, etc.
-    return devices.filter(dev => (dev.interfaceNumber ?? -1) <= 0);
-  } catch (err: any) {
-    console.error('[keyboard.ipc] getKeyboards failed:', err.message?.slice(0, 100));
-    return [];
-  } finally {
-    try { tempIc?.destroy(); } catch {}
+    const name = values.FriendlyName || values.DeviceDesc || values.Mfg || null;
+    const usableName = name && !isGenericDeviceName(name) ? name : null;
+    registryNameCache.set(key, usableName);
+    return usableName;
+  } catch {
+    registryNameCache.set(key, null);
+    return null;
   }
 }
 
-// ─── Macro key set (populated from renderer when macros change) ───────────────
-// Keys in this set will execute macro; keys NOT in set will be suppressed
-// when the macro device is selected
+async function enrichDeviceNames(inputDevices: KeyboardDevice[]): Promise<KeyboardDevice[]> {
+  const pnpDevices = await loadPnpDevices();
+  return Promise.all(inputDevices.map(async device => {
+    const match = findPnpMatch(device, pnpDevices);
+    const registryName = await lookupRegistryDeviceName(device.hwid ?? '');
+    const typeLabel = device.deviceType === 'mouse' ? 'Mouse' : 'Keyboard';
+    const matchedName = match?.name?.trim();
+    let baseName = `${typeLabel} ${formatVidPid(device)}`;
+    if (matchedName && !isGenericDeviceName(matchedName)) {
+      baseName = matchedName;
+    } else if (registryName) {
+      baseName = registryName;
+    }
+    const name = (device.interfaceNumber ?? -1) > 0
+      ? `${baseName} [Interface ${device.interfaceNumber}]`
+      : baseName;
 
-const assignedKeyCodes = new Set<string>(); // e.g. 'KeyA', 'F1', 'Space'
+    return {
+      ...device,
+      name,
+    };
+  }));
+}
 
-// ─── Interception listener ────────────────────────────────────────────────────
-//
-// API (from source):
-//   ic.wait() → Promise<Device | null>
-//   device.receive() → stroke
-//   device.send(stroke)   ← pass through (keyboard works normally)
-//   NOT calling send()    ← suppress (keystroke is consumed)
+function sendHostCommand(command: Record<string, unknown>): void {
+  if (!rawInputHost || rawInputHost.killed || !rawInputHost.stdin.writable) return;
+  rawInputHost.stdin.write(`${JSON.stringify(command)}\n`);
+}
 
-function startListener(): void {
-  if (listenerActive) return;
-
-  let Interception: any, FilterKeyState: any;
-  try {
-    const mod = require('node-interception');
-    Interception = mod.Interception;
-    FilterKeyState = mod.FilterKeyState;
-  } catch (err: any) {
-    console.error('[keyboard.ipc] node-interception not available:', err.message);
+function handleHostMessage(message: RawInputHostMessage): void {
+  if (message.type === 'ready' || message.type === 'device-list') {
+    rawDevices = normalizeDevices(message.devices ?? []);
+    hookInstalled = message.hookInstalled ?? hookInstalled;
+    if (selectedDeviceKey && !rawDevices.some(device => device.id === selectedDeviceKey)) {
+      selectedDeviceKey = '';
+      sendHostCommand({ cmd: 'select', deviceId: '' });
+    }
+    rawDevices = rawDevices.map(device => ({
+      ...device,
+      isSelected: device.id === selectedDeviceKey,
+    }));
+    devices = groupInputDevices(rawDevices);
+    resolveDeviceWaiters();
     return;
   }
 
-  try {
-    ic = new Interception();
-    ic.setFilter('keyboard', FilterKeyState.ALL);
-    listenerActive = true;
-    console.log('[keyboard.ipc] Interception listener started');
-  } catch (err: any) {
-    console.error('[keyboard.ipc] Interception init failed:', err.message);
+  if (message.type === 'hook') {
+    hookInstalled = message.installed ?? hookInstalled;
+    console.log('[keyboard.ipc] Low-level keyboard hook installed:', hookInstalled);
     return;
   }
 
-  function loop() {
-    if (!listenerActive || !ic) return;
-
-    ic.wait()
-      .then((device: any) => {
-        if (!device) { loop(); return; }
-
-        const stroke = device.receive();
-        const deviceKey = `interception:${device.id}`;
-        const isMacroDevice = selectedDeviceKey !== '' && deviceKey === selectedDeviceKey;
-
-        if (!isMacroDevice) {
-          // Not the macro device → always pass through normally
-          device.send(stroke);
-          loop();
-          return;
-        }
-
-        // ── This IS the macro device ──────────────────────────────────────────
-        const code = strokeToCode(stroke);
-        const isUp = strokeIsUp(stroke);
-
-        if (assignedKeyCodes.has(code)) {
-          // Key has a macro assigned → suppress keystroke, emit event to renderer
-          // Do NOT call device.send(stroke) → keystroke is consumed
-          if (mainWindowRef && !mainWindowRef.isDestroyed()) {
-            mainWindowRef.webContents.send('keyboard:event', {
-              code,
-              keycode: stroke.code ?? 0,
-              state: isUp ? 'up' : 'down',
-              deviceId: deviceKey,
-              isMacroDevice: true,
-            } as KeyEvent & { isMacroDevice: boolean });
-          }
-        } else {
-          // Key has NO macro → suppress (don't send, don't emit)
-          // The key does nothing — it's a dedicated macro keyboard
-        }
-
-        loop();
-      })
-      .catch((err: any) => {
-        if (listenerActive) {
-          console.error('[keyboard.ipc] wait error:', err.message?.slice(0, 80));
-          setTimeout(loop, 500);
-        }
-      });
+  if (message.type === 'error') {
+    console.error('[keyboard.ipc] Raw Input host error:', message.message);
+    return;
   }
 
-  loop();
+  if (message.type !== 'key') return;
+  if (!message.code || !message.state || !message.deviceId) return;
+  if (message.deviceId !== selectedDeviceKey) return;
+  if (!assignedKeyCodes.has(message.code)) return;
+  if (!mainWindowRef || mainWindowRef.isDestroyed()) return;
+
+  mainWindowRef.webContents.send('keyboard:event', {
+    code: message.code,
+    keycode: message.keycode ?? 0,
+    scanCode: message.scanCode,
+    extended: message.extended,
+    state: message.state,
+    deviceId: message.deviceId,
+    isMacroDevice: true,
+  } as KeyEvent);
 }
 
-function stopListener(): void {
-  listenerActive = false;
-  try { ic?.destroy(); } catch {}
-  ic = null;
+function ensureRawInputStarted(): void {
+  if (rawInputHost || rawInputStarting) return;
+  rawInputStarting = true;
+
+  try {
+    rawInputHost = startRawInputHost(handleHostMessage, (code) => {
+      console.error('[keyboard.ipc] Raw Input host exited:', code);
+      rawInputHost = null;
+      rawInputStarting = false;
+      hookInstalled = false;
+      resolveDeviceWaiters();
+    });
+    rawInputStarting = false;
+    console.log('[keyboard.ipc] Raw Input host started');
+  } catch (err: any) {
+    rawInputStarting = false;
+    console.error('[keyboard.ipc] Raw Input host unavailable:', err.message);
+    resolveDeviceWaiters();
+  }
 }
 
-// ─── IPC ─────────────────────────────────────────────────────────────────────
+function waitForDevices(timeoutMs = 1500): Promise<void> {
+  if (rawDevices.length > 0) return Promise.resolve();
+  return new Promise(resolve => {
+    const timeout = setTimeout(() => {
+      pendingDeviceResolvers.delete(done);
+      resolve();
+    }, timeoutMs);
+
+    const done = () => {
+      clearTimeout(timeout);
+      resolve();
+    };
+
+    pendingDeviceResolvers.add(done);
+  });
+}
+
+async function listKeyboards(): Promise<KeyboardDevice[]> {
+  ensureRawInputStarted();
+  sendHostCommand({ cmd: 'list' });
+  await waitForDevices();
+  const enrichedDevices = await enrichDeviceNames(rawDevices);
+  rawDevices = enrichedDevices.map(device => ({
+    ...device,
+    isSelected: device.id === selectedDeviceKey,
+  }));
+  devices = groupInputDevices(rawDevices);
+  return devices;
+}
 
 export function registerKeyboardIpc(mainWindow: BrowserWindow | null): void {
   mainWindowRef = mainWindow;
 
-  ipcMain.handle('keyboard:list', async () => {
-    const devices = getKeyboards();
-    if (devices.length > 0) return devices;
-    return [{
-      id: 'all', name: 'All Keyboards',
-      vendorId: 0, productId: 0,
-      isSelected: selectedDeviceKey === 'all', isConnected: true,
-    }];
-  });
+  ipcMain.handle('keyboard:list', async () => listKeyboards());
 
-  ipcMain.handle('keyboard:select', (_e, deviceId: string) => {
+  ipcMain.handle('keyboard:select', async (_e, deviceId: string) => {
+    ensureRawInputStarted();
     selectedDeviceKey = deviceId;
-    console.log('[keyboard.ipc] Selected:', deviceId);
+    rawDevices = rawDevices.map(device => ({
+      ...device,
+      isSelected: device.id === selectedDeviceKey,
+    }));
+    devices = devices.map(device => ({
+      ...device,
+      isSelected: device.id === selectedDeviceKey,
+    }));
+    sendHostCommand({ cmd: 'select', deviceId });
+    sendHostCommand({ cmd: 'setBlock', enabled: true });
+    console.log('[keyboard.ipc] Selected Raw Input device:', deviceId);
     return true;
   });
 
-  // Called by renderer whenever macros change
   ipcMain.handle('keyboard:updateMacroKeys', (_e, keyCodes: string[]) => {
     assignedKeyCodes.clear();
     keyCodes.forEach(k => assignedKeyCodes.add(k));
@@ -324,7 +409,7 @@ export function registerKeyboardIpc(mainWindow: BrowserWindow | null): void {
     return true;
   });
 
-  startListener();
+  ensureRawInputStarted();
 }
 
 export { selectedDeviceKey as selectedDeviceHandle };

@@ -106,16 +106,21 @@ class AudioSessions
         var enumerator = GetEnumerator();
         var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
 
+        int previousValue, currentValue;
+
         if (target == "master")
         {
-            var current = device.AudioEndpointVolume.MasterVolumeLevelScalar * 100;
+            previousValue = (int)(device.AudioEndpointVolume.MasterVolumeLevelScalar * 100);
             float newVol = mode == "increase"
-                ? Math.Min(100, current + delta)
-                : Math.Max(0, current - delta);
+                ? Math.Min(100, previousValue + delta)
+                : Math.Max(0, previousValue - delta);
             device.AudioEndpointVolume.MasterVolumeLevelScalar = newVol / 100f;
+            currentValue = (int)newVol;
         }
         else
         {
+            previousValue = 0;
+            currentValue = 0;
             var sessions = device.AudioSessionManager.Sessions;
             for (int i = 0; i < sessions.Count; i++)
             {
@@ -128,11 +133,12 @@ class AudioSessions
                     var proc = System.Diagnostics.Process.GetProcessById((int)ctrl.GetProcessID);
                     if (proc.ProcessName.Equals(target, StringComparison.OrdinalIgnoreCase))
                     {
-                        var current = session.SimpleAudioVolume.Volume * 100;
+                        previousValue = (int)(session.SimpleAudioVolume.Volume * 100);
                         float newVol = mode == "increase"
-                            ? Math.Min(100, current + delta)
-                            : Math.Max(0, current - delta);
+                            ? Math.Min(100, previousValue + delta)
+                            : Math.Max(0, previousValue - delta);
                         session.SimpleAudioVolume.Volume = newVol / 100f;
+                        currentValue = (int)newVol;
                         break;
                     }
                 }
@@ -140,21 +146,31 @@ class AudioSessions
             }
         }
 
-        Console.WriteLine("OK");
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            ok = true,
+            previousValue,
+            currentValue
+        }));
     }
 
     static void SetVolume(string target, int value)
     {
         var enumerator = GetEnumerator();
         var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
-        float vol = Math.Max(0, Math.Min(100, value)) / 100f;
+        int clampedValue = Math.Max(0, Math.Min(100, value));
+        float vol = clampedValue / 100f;
+
+        int previousValue;
 
         if (target == "master")
         {
+            previousValue = (int)(device.AudioEndpointVolume.MasterVolumeLevelScalar * 100);
             device.AudioEndpointVolume.MasterVolumeLevelScalar = vol;
         }
         else
         {
+            previousValue = 0;
             var sessions = device.AudioSessionManager.Sessions;
             for (int i = 0; i < sessions.Count; i++)
             {
@@ -166,6 +182,7 @@ class AudioSessions
                     var proc = System.Diagnostics.Process.GetProcessById((int)ctrl.GetProcessID);
                     if (proc.ProcessName.Equals(target, StringComparison.OrdinalIgnoreCase))
                     {
+                        previousValue = (int)(session.SimpleAudioVolume.Volume * 100);
                         session.SimpleAudioVolume.Volume = vol;
                         break;
                     }
@@ -174,7 +191,12 @@ class AudioSessions
             }
         }
 
-        Console.WriteLine("OK");
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            ok = true,
+            previousValue,
+            currentValue = clampedValue
+        }));
     }
 
     static void ToggleMute(string target)
@@ -182,12 +204,19 @@ class AudioSessions
         var enumerator = GetEnumerator();
         var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
 
+        bool isMuted;
+        int volume;
+
         if (target == "master")
         {
             device.AudioEndpointVolume.Mute = !device.AudioEndpointVolume.Mute;
+            isMuted = device.AudioEndpointVolume.Mute;
+            volume = (int)(device.AudioEndpointVolume.MasterVolumeLevelScalar * 100);
         }
         else
         {
+            isMuted = false;
+            volume = 0;
             var sessions = device.AudioSessionManager.Sessions;
             for (int i = 0; i < sessions.Count; i++)
             {
@@ -200,6 +229,8 @@ class AudioSessions
                     if (proc.ProcessName.Equals(target, StringComparison.OrdinalIgnoreCase))
                     {
                         session.SimpleAudioVolume.Mute = !session.SimpleAudioVolume.Mute;
+                        isMuted = session.SimpleAudioVolume.Mute;
+                        volume = (int)(session.SimpleAudioVolume.Volume * 100);
                         break;
                     }
                 }
@@ -207,6 +238,11 @@ class AudioSessions
             }
         }
 
-        Console.WriteLine("OK");
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            ok = true,
+            isMuted,
+            volume
+        }));
     }
 }

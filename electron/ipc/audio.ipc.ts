@@ -1,8 +1,8 @@
 import { ipcMain } from 'electron';
 import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
-import path from 'path';
-import fs from 'fs';
+import { app } from 'electron';
+import { execFileSync } from 'child_process';
 import { AudioSession } from '../../src/types/macro.types';
 import { runAppVolume, ensureAppVolumeExe } from '../native/appvolume';
 
@@ -74,6 +74,60 @@ async function runAudioExe(_args: string[]): Promise<string> {
 
 // ─── Get audio sessions ───────────────────────────────────────────────────────
 
+const iconCache = new Map<string, string>();
+
+async function getExePathsByPids(pids: number[]): Promise<Map<number, string>> {
+  const result = new Map<number, string>();
+  if (pids.length === 0) return result;
+
+  try {
+    const pidList = pids.join(',');
+    const out = execFileSync('powershell', [
+      '-NoProfile', '-NonInteractive', '-Command',
+      `Get-Process -Id ${pidList} -ErrorAction SilentlyContinue | Select-Object Id,Path | ConvertTo-Json -Compress`
+    ], { timeout: 3000 }).toString().trim();
+
+    if (!out) return result;
+
+    const raw = JSON.parse(out);
+    const items = Array.isArray(raw) ? raw : [raw];
+    items.forEach((item: any) => {
+      if (item.Id && item.Path) result.set(item.Id, item.Path);
+    });
+  } catch { }
+
+  return result;
+}
+
+async function enrichWithIcons(sessions: AudioSession[]): Promise<AudioSession[]> {
+  // Lấy tất cả PID cần query (bỏ master)
+  const pids = sessions
+    .filter(s => s.processId > 0)
+    .map(s => s.processId);
+
+  // Batch query 1 lần
+  const exeMap = await getExePathsByPids(pids);
+
+  return Promise.all(sessions.map(async (session) => {
+    if (session.processId === 0) return session;
+
+    const exePath = exeMap.get(session.processId);
+    if (!exePath) return session;
+
+    if (iconCache.has(exePath)) {
+      return { ...session, iconPath: exePath, iconDataUrl: iconCache.get(exePath) };
+    }
+
+    try {
+      const icon = await app.getFileIcon(exePath, { size: 'normal' });
+      const iconDataUrl = icon.toDataURL();
+      iconCache.set(exePath, iconDataUrl);
+      return { ...session, iconPath: exePath, iconDataUrl };
+    } catch {
+      return session;
+    }
+  }));
+}
 async function getAudioSessions(): Promise<AudioSession[]> {
   try {
     const out = runAppVolume(['list']);
@@ -85,6 +139,7 @@ async function getAudioSessions(): Promise<AudioSession[]> {
       displayName: item.displayName || item.processName || 'Unknown',
       volume: Math.round(item.volume || 0),
       isMuted: item.isMuted || false,
+      iconPath: item.iconPath || undefined,
     }));
   } catch (err: any) {
     console.error('[audio.ipc] getAudioSessions failed:', err.message?.slice(0, 100));
@@ -104,27 +159,52 @@ function getDefaultSessions(): AudioSession[] {
   ];
 }
 
+// ─── Volume result type ───────────────────────────────────────────────────────
+
+interface VolumeResult {
+  ok: boolean;
+  previousValue: number;
+  currentValue: number;
+}
+
+interface MuteResult {
+  ok: boolean;
+  isMuted: boolean;
+  volume: number;
+}
+
 // ─── Set volume ───────────────────────────────────────────────────────────────
 
-async function setVolume(target: string, volume: number): Promise<boolean> {
+async function setVolume(target: string, volume: number): Promise<VolumeResult | null> {
   try {
-    runAppVolume(['set-volume', target, String(Math.max(0, Math.min(100, volume)))]);
-    return true;
+    const out = runAppVolume(['set-volume', target, String(Math.max(0, Math.min(100, volume)))]);
+    return JSON.parse(out) as VolumeResult;
   } catch (err: any) {
     console.error('[audio.ipc] setVolume failed:', err.message?.slice(0, 80));
-    return false;
+    return null;
+  }
+}
+
+async function adjustVolume(target: string, delta: number, mode: 'increase' | 'decrease'): Promise<VolumeResult | null> {
+  try {
+    const cmd = mode === 'increase' ? 'volume-up' : 'volume-down';
+    const out = runAppVolume([cmd, target, String(delta)]);
+    return JSON.parse(out) as VolumeResult;
+  } catch (err: any) {
+    console.error('[audio.ipc] adjustVolume failed:', err.message?.slice(0, 80));
+    return null;
   }
 }
 
 // ─── Toggle mute ──────────────────────────────────────────────────────────────
 
-async function toggleMute(target: string): Promise<boolean> {
+async function toggleMute(target: string): Promise<MuteResult | null> {
   try {
-    runAppVolume(['toggle-mute', target]);
-    return true;
+    const out = runAppVolume(['toggle-mute', target]);
+    return JSON.parse(out) as MuteResult;
   } catch (err: any) {
     console.error('[audio.ipc] toggleMute failed:', err.message?.slice(0, 80));
-    return false;
+    return null;
   }
 }
 
@@ -132,14 +212,19 @@ async function toggleMute(target: string): Promise<boolean> {
 
 export function registerAudioIpc(): void {
   ipcMain.handle('audio:getSessions', async (): Promise<AudioSession[]> => {
-    return getAudioSessions();
+    const sessions = await getAudioSessions();
+    return enrichWithIcons(sessions);
   });
 
-  ipcMain.handle('audio:setVolume', async (_event, target: string, volume: number): Promise<boolean> => {
+  ipcMain.handle('audio:setVolume', async (_event, target: string, volume: number) => {
     return setVolume(target, volume);
   });
 
-  ipcMain.handle('audio:toggleMute', async (_event, target: string): Promise<boolean> => {
+  ipcMain.handle('audio:adjustVolume', async (_event, target: string, delta: number, mode: 'increase' | 'decrease') => {
+    return adjustVolume(target, delta, mode);
+  });
+
+  ipcMain.handle('audio:toggleMute', async (_event, target: string) => {
     return toggleMute(target);
   });
 }

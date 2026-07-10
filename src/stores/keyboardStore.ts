@@ -74,23 +74,29 @@ export const useKeyboardStore = create<KeyboardState>((set, get) => ({
       }
       const devices = await electronAPI.keyboard.list();
       const savedDeviceId = await electronAPI.store.loadDevice();
+      const selectableDevices = devices.filter((d: KeyboardDevice) => d.deviceType !== 'mouse' && d.isKeyboard !== false);
+      const resolvedDeviceId = selectableDevices.some((d: KeyboardDevice) => d.id === savedDeviceId)
+        ? savedDeviceId
+        : selectableDevices[0]?.id ?? '';
 
       const updatedDevices = devices.map((d: KeyboardDevice) => ({
         ...d,
-        isSelected: d.id === savedDeviceId,
+        isSelected: d.id === resolvedDeviceId,
       }));
 
       set({
         devices: updatedDevices,
-        selectedDeviceId: savedDeviceId,
+        selectedDeviceId: resolvedDeviceId,
         isLoading: false,
       });
 
       // ── KEY FIX: notify main process of the saved device on startup ──────
-      // Without this, Interception listener has selectedDeviceKey = ''
-      // and ignores all keystrokes even though UI shows device as selected
-      if (savedDeviceId) {
-        await electronAPI.keyboard.select(savedDeviceId);
+      // Keep the main process in sync with the persisted device id.
+      if (resolvedDeviceId) {
+        await electronAPI.keyboard.select(resolvedDeviceId);
+        if (resolvedDeviceId !== savedDeviceId) {
+          await electronAPI.store.saveDevice(resolvedDeviceId);
+        }
       }
     } catch (err: any) {
       set({ error: err.message, isLoading: false });

@@ -76,6 +76,10 @@ export function sendNotification(data: {
   message?: string;
   icon?: string;
   duration?: number;
+  currentValue?: number;
+  previousValue?: number;
+  unit?: string;
+  maxValue?: number;
 }): void {
   notifWindow?.webContents.send('notif:show', data);
 }

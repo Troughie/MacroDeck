@@ -95,10 +95,13 @@ export interface MacroConfig {
 export interface KeyboardDevice {
   id: string;
   name: string;
+  deviceType?: 'keyboard' | 'mouse' | 'hid';
+  inputTags?: Array<'keyboard' | 'mouse' | 'hid'>;
   vendorId: number;
   productId: number;
   interfaceNumber?: number;  // HID interface index (-1 = single-interface, 0 = primary keyboard, >0 = secondary)
-  hwid?: string;             // raw hardware ID string from Interception
+  hwid?: string;             // raw hardware ID string when the input backend provides one
+  rawDeviceHandle?: string;  // Windows Raw Input hDevice handle, for diagnostics only
   isKeyboard?: boolean;      // false if device name suggests it's not a keyboard (mouse, receiver, etc.)
   isSelected: boolean;
   isConnected: boolean;
@@ -109,8 +112,11 @@ export interface KeyboardDevice {
 export interface KeyEvent {
   code: string;   // e.g. 'KeyA', 'F1', 'Space'
   keycode: number;
+  scanCode?: number;
+  extended?: boolean;
   state: 'down' | 'up';
   deviceId?: string;
+  isMacroDevice?: boolean;
 }
 
 // ─── Installed App ───────────────────────────────────────────────────────────
@@ -119,6 +125,7 @@ export interface InstalledApp {
   name: string;
   exePath: string;
   iconPath?: string;
+  iconDataUrl?: string;
   publisher?: string;
 }
 
@@ -131,6 +138,7 @@ export interface AudioSession {
   volume: number;    // 0–100
   isMuted: boolean;
   iconPath?: string;
+  iconDataUrl?: string
 }
 
 // ─── Store Schema ─────────────────────────────────────────────────────────────

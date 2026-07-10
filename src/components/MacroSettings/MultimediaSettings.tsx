@@ -8,10 +8,10 @@ type MediaAction = MultimediaSettingsType['action'];
 
 const ACTIONS: { value: MediaAction; label: string; icon: React.ComponentType<any> }[] = [
   { value: 'PLAY_PAUSE', label: 'Play/Pause', icon: PlayCircle },
-  { value: 'PLAY',       label: 'Play',       icon: Play },
-  { value: 'PAUSE',      label: 'Pause',      icon: Pause },
-  { value: 'PREV',       label: 'Previous',   icon: SkipBack },
-  { value: 'NEXT',       label: 'Next',       icon: SkipForward },
+  { value: 'PLAY', label: 'Play', icon: Play },
+  { value: 'PAUSE', label: 'Pause', icon: Pause },
+  { value: 'PREV', label: 'Previous', icon: SkipBack },
+  { value: 'NEXT', label: 'Next', icon: SkipForward },
 ];
 
 interface Props {
@@ -67,7 +67,7 @@ export function MultimediaSettings({ keyCode, macro, profileId }: Props) {
       {/* Target app */}
       <div>
         <label className="text-text-secondary text-xs font-medium mb-1.5 block">Target</label>
-        <div className="space-y-1 max-h-28 overflow-y-auto">
+        <div className="space-y-1 max-h-50 overflow-y-auto">
           {/* System option */}
           <button
             onClick={() => handleTargetChange('system', 'System (Global)')}
@@ -96,7 +96,11 @@ export function MultimediaSettings({ keyCode, macro, profileId }: Props) {
                 }
               `}
             >
-              <Music size={12} className="text-purple-400 flex-shrink-0" />
+              {session.iconDataUrl
+                ? <img src={session.iconDataUrl} alt={session.displayName} width={32} height={32} />
+                : <Music size={12} className="text-purple-400 flex-shrink-0" />
+              }
+
               <span className="text-text-primary text-xs truncate">{session.displayName}</span>
             </button>
           ))}

@@ -107,11 +107,10 @@ export function MacroSettings({ keyCode }: MacroSettingsProps) {
             <button
               onClick={() => handleToggleScope(false)}
               title={`Only in "${activeProfile?.name ?? 'this profile'}"`}
-              className={`flex items-center gap-1 px-2 py-1 text-xs transition-colors ${
-                !isGlobal
-                  ? 'bg-accent-blue/20 text-accent-blue'
-                  : 'text-text-muted hover:text-text-primary hover:bg-bg-hover'
-              }`}
+              className={`flex items-center gap-1 px-2 py-1 text-xs transition-colors ${!isGlobal
+                ? 'bg-accent-blue/20 text-accent-blue'
+                : 'text-text-muted hover:text-text-primary hover:bg-bg-hover'
+                }`}
             >
               <User size={11} />
               <span className="hidden sm:inline">Profile</span>
@@ -119,11 +118,10 @@ export function MacroSettings({ keyCode }: MacroSettingsProps) {
             <button
               onClick={() => handleToggleScope(true)}
               title="Available in all profiles"
-              className={`flex items-center gap-1 px-2 py-1 text-xs transition-colors border-l border-border ${
-                isGlobal
-                  ? 'bg-accent-blue/20 text-accent-blue'
-                  : 'text-text-muted hover:text-text-primary hover:bg-bg-hover'
-              }`}
+              className={`flex items-center gap-1 px-2 py-1 text-xs transition-colors border-l border-border ${isGlobal
+                ? 'bg-accent-blue/20 text-accent-blue'
+                : 'text-text-muted hover:text-text-primary hover:bg-bg-hover'
+                }`}
             >
               <Globe size={11} />
               <span className="hidden sm:inline">All</span>
@@ -162,9 +160,8 @@ export function MacroSettings({ keyCode }: MacroSettingsProps) {
         )}
       </AnimatePresence>
       {/* Scope indicator */}
-      <div className={`px-3 py-1.5 text-xs flex items-center gap-1.5 border-b border-border ${
-        isGlobal ? 'bg-accent-blue/5 text-accent-blue' : 'bg-bg-card text-text-muted'
-      }`}>
+      <div className={`px-3 py-1.5 text-xs flex items-center gap-1.5 border-b border-border ${isGlobal ? 'bg-accent-blue/5 text-accent-blue' : 'bg-bg-card text-text-muted'
+        }`}>
         {isGlobal ? (
           <><Globe size={11} /> Available in <strong>all profiles</strong></>
         ) : (
@@ -173,7 +170,7 @@ export function MacroSettings({ keyCode }: MacroSettingsProps) {
       </div>
 
       {/* Settings content */}
-      <div className="flex-1 overflow-y-auto p-3">
+      <div className="flex-1 overflow-y-auto p-3 h-500">
         {macro.type === 'APP_LAUNCH' && <AppLaunchSettings keyCode={keyCode} macro={macro} profileId={currentProfileId} />}
         {macro.type === 'WEB_LINK' && <WebLinkSettings keyCode={keyCode} macro={macro} profileId={currentProfileId} />}
         {macro.type === 'MULTIMEDIA' && <MultimediaSettings keyCode={keyCode} macro={macro} profileId={currentProfileId} />}
