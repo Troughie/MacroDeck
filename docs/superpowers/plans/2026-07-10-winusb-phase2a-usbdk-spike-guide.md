@@ -60,6 +60,27 @@ from the command? Any BSoD or hang (if so, stop and tell me — that rules UsbDk
 
 ---
 
+## Part 2.5 — Anti-cheat reality check (CRITICAL for your use case)
+
+You confirmed you play games with kernel anti-cheat. The risk (UsbDk is a signed-but-not-WHQL
+kernel USB driver that anti-cheats may flag) is **reasoned from mechanism, not a confirmed report**.
+This step settles it empirically before we build anything.
+
+With UsbDk installed (Part 1) — you do NOT need the hide rule active for this test, because
+anti-cheats scan *loaded drivers*, not active captures:
+
+1. Launch the anti-cheat game(s) you actually play (Valorant, LoL, Fortnite, PUBG, Apex, etc.).
+2. Observe:
+   - Does the game **launch normally**?
+   - Any popup like "incompatible driver" / "untrusted driver detected" naming a UsbDk file
+     (e.g. `UsbDk.sys`)?
+   - Does the anti-cheat refuse to start?
+
+**Report back:** for each game — launches fine / blocked / warning (quote the exact message).
+This determines whether UsbDk is viable for you or we must pivot to a QMK/VIA-firmware approach.
+
+---
+
 ## Part 3 — Prove reading through the UsbDk backend
 
 I will give you a tiny throwaway script to confirm node-usb can read the hidden Keychron via the
