@@ -40,8 +40,11 @@ function startReaderFor(deviceKey: string): void {
         } as KeyEvent);
       },
       (err) => {
-        console.error('[keyboard.ipc] reader error:', err.message);
-        stopReader();
+        // hid-keyboard already recovers from transient endpoint errors; reaching
+        // here means recovery was exhausted. Log it but keep the reader in place —
+        // tearing down on every error caused reopen/"Polling is not active" storms.
+        // The next keyboard:select will cleanly stop and reopen.
+        console.warn('[keyboard.ipc] reader error (recovery exhausted):', err.message);
       },
     );
     console.log('[keyboard.ipc] Reading WinUSB keyboard:', deviceKey);
