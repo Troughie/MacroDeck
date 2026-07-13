@@ -9,6 +9,7 @@ import { registerMacroIpc } from './ipc/macro.ipc';
 import { registerSystemIpc, setWindowsStartup } from './ipc/system.ipc';
 import { ensureAppVolumeExe } from './native/appvolume';
 import { createNotificationWindow, registerNotificationIpc } from './notification-window';
+import { installFileLogger } from './debug-log';
 
 const store = new Store<StoreSchema>({
   name: 'macrodeck-config',
@@ -54,6 +55,11 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      // MacroDeck runs in the tray with its window hidden most of the time. By
+      // default Chromium throttles hidden/occluded renderers (clamped timers,
+      // paused rendering), which would delay the keyboard:event handler that runs
+      // macros — the app must stay fully responsive while backgrounded.
+      backgroundThrottling: false,
     },
   });
 
@@ -197,12 +203,13 @@ function registerWindowIpc(): void {
 }
 
 app.whenReady().then(() => {
+  installFileLogger();
+
   setTimeout(() => {
-    try {
-      ensureAppVolumeExe();
-    } catch (e) {
+    // Fire-and-forget async compile; errors are logged, never block startup.
+    ensureAppVolumeExe().catch((e) => {
       console.error('[main] AppVolume compile failed:', e);
-    }
+    });
   }, 2000);
 
   createWindow();

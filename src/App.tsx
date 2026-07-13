@@ -18,7 +18,7 @@ import { MACRO_TYPE_INFO, MacroType, MacroConfig } from './types/macro.types';
 import { electronAPI } from './lib/electron';
 
 export default function App() {
-  const { loadDevices, setKeyPressed, setKeyReleased } = useKeyboardStore();
+  const { loadDevices, setKeyPressed, setKeyReleased, clearKeys } = useKeyboardStore();
   const { loadMacros, assignMacro, selectedKeyCode, getMacrosForProfile } = useMacroStore();
   const { activeProfileId, loadProfiles } = useProfileStore();
 
@@ -79,6 +79,15 @@ export default function App() {
     });
     return () => { unsubscribe(); };
   }, [activeMacros, setKeyPressed, setKeyReleased]);
+
+  // When the main-process reader is replaced (re-select, self-heal, driver swap),
+  // any key held at that moment never gets its key-up — clear held state so nothing
+  // stays stuck-highlighted on the visualizer.
+  useEffect(() => {
+    if (!electronAPI) return;
+    const unsub = electronAPI.keyboard.onFlush(() => clearKeys());
+    return () => { unsub(); };
+  }, [clearKeys]);
 
   // ─── Execute macro — notifications handled by main process overlay ─────────
   const executeMacroWithToast = useCallback(async (macro: MacroConfig) => {

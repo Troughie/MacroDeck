@@ -103,6 +103,7 @@ export interface KeyboardDevice {
   hwid?: string;             // raw hardware ID string when the input backend provides one
   rawDeviceHandle?: string;  // Windows Raw Input hDevice handle, for diagnostics only
   isKeyboard?: boolean;      // false if device name suggests it's not a keyboard (mouse, receiver, etc.)
+  driverState?: 'normal' | 'dedicated'; // 'dedicated' = bound to WinUSB (captured by MacroDeck)
   isSelected: boolean;
   isConnected: boolean;
 }

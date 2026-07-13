@@ -1,5 +1,5 @@
 import { ipcMain, shell } from 'electron';
-import { exec, spawn } from 'child_process';
+import { exec, execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs';
@@ -22,6 +22,7 @@ import {
 } from '../../src/types/macro.types';
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 // ─── @nut-tree-fork/nut-js (optional — graceful fallback) ────────────────────
 let nutKeyboard: any = null;
@@ -67,7 +68,7 @@ function ensureTmpDir() {
 // Pre-compile the key sender script once
 let keySenderExe: string | null = null;
 
-function getKeySenderExe(): string | null {
+async function getKeySenderExe(): Promise<string | null> {
   if (keySenderExe && fs.existsSync(keySenderExe)) return keySenderExe;
   try {
     ensureTmpDir();
@@ -88,8 +89,7 @@ class KeySender {
     const srcPath = path.join(tmpDir, 'KeySender.cs');
     const exePath = path.join(tmpDir, 'KeySender.exe');
     fs.writeFileSync(srcPath, src, 'utf8');
-    const { execFileSync } = require('child_process');
-    execFileSync(csc, ['/nologo', `/out:${exePath}`, '/r:System.dll', srcPath], { timeout: 15000, stdio: 'pipe' });
+    await execFileAsync(csc, ['/nologo', `/out:${exePath}`, '/r:System.dll', srcPath], { timeout: 15000 });
     keySenderExe = exePath;
     return exePath;
   } catch {
@@ -98,13 +98,11 @@ class KeySender {
 }
 
 async function sendVirtualKey(vkCode: number): Promise<void> {
-  const { execFileSync } = require('child_process');
-
   // Try compiled KeySender.exe first (fastest)
-  const exe = getKeySenderExe();
+  const exe = await getKeySenderExe();
   if (exe) {
     try {
-      execFileSync(exe, [String(vkCode)], { timeout: 2000 });
+      await execFileAsync(exe, [String(vkCode)], { timeout: 2000 });
       return;
     } catch { }
   }
@@ -126,7 +124,7 @@ Start-Sleep -Milliseconds 30
 `;
     const scriptPath = path.join(tmpDir, `vk_${vkCode}.ps1`);
     fs.writeFileSync(scriptPath, ps, 'utf8');
-    execFileSync('powershell', [
+    await execFileAsync('powershell', [
       '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath,
     ], { timeout: 3000 });
   } catch (err: any) {
@@ -189,7 +187,7 @@ async function executeMultimedia(settings: MultimediaSettings): Promise<void> {
 
 async function executeMuteToggle(settings: MuteSettings): Promise<void> {
   try {
-    runAppVolume(['toggle-mute', settings.target]);
+    await runAppVolume(['toggle-mute', settings.target]);
     return;
   } catch (err: any) {
     console.error('[macro.ipc] AppVolume mute failed:', err.message?.slice(0, 100));
@@ -207,11 +205,11 @@ async function executeVolumeAdjust(
   try {
     let out: string;
     if (settings.mode === 'set' && settings.setValue !== undefined) {
-      out = runAppVolume(['set-volume', settings.target, String(settings.setValue)]);
+      out = await runAppVolume(['set-volume', settings.target, String(settings.setValue)]);
     } else if (settings.mode === 'increase') {
-      out = runAppVolume(['volume-up', settings.target, String(settings.delta)]);
+      out = await runAppVolume(['volume-up', settings.target, String(settings.delta)]);
     } else if (settings.mode === 'decrease') {
-      out = runAppVolume(['volume-down', settings.target, String(settings.delta)]);
+      out = await runAppVolume(['volume-down', settings.target, String(settings.delta)]);
     } else {
       return null;
     }
@@ -287,7 +285,7 @@ class HotkeySender {
 
 let hotkeySenderExe: string | null = null;
 
-function getHotkeySenderExe(): string | null {
+async function getHotkeySenderExe(): Promise<string | null> {
   if (hotkeySenderExe && fs.existsSync(hotkeySenderExe)) return hotkeySenderExe;
   try {
     ensureTmpDir();
@@ -296,9 +294,8 @@ function getHotkeySenderExe(): string | null {
     const srcPath = path.join(tmpDir, 'HotkeySender.cs');
     const exePath = path.join(tmpDir, 'HotkeySender.exe');
     fs.writeFileSync(srcPath, HOTKEY_SENDER_CS, 'utf8');
-    const { execFileSync } = require('child_process');
-    execFileSync(csc, ['/nologo', `/out:${exePath}`, '/r:System.dll', srcPath],
-      { timeout: 15000, stdio: 'pipe' });
+    await execFileAsync(csc, ['/nologo', `/out:${exePath}`, '/r:System.dll', srcPath],
+      { timeout: 15000 });
     hotkeySenderExe = exePath;
     return exePath;
   } catch {
@@ -317,11 +314,10 @@ async function executeHotkey(settings: HotkeySettings): Promise<void> {
   if (vkCodes.length === 0) throw new Error('No valid VK codes for: ' + settings.keys.join(', '));
 
   // Try HotkeySender.exe first (most reliable for global hotkeys like Soundpad)
-  const exe = getHotkeySenderExe();
+  const exe = await getHotkeySenderExe();
   if (exe) {
     try {
-      const { execFileSync } = require('child_process');
-      execFileSync(exe, vkCodes.map(String), { timeout: 3000 });
+      await execFileAsync(exe, vkCodes.map(String), { timeout: 3000 });
       return;
     } catch (err: any) {
       console.error('[macro.ipc] HotkeySender failed:', err.message?.slice(0, 80));
@@ -350,8 +346,7 @@ ${[...vkCodes].reverse().map(vk => `[KS2]::keybd_event(${vk}, 0, 2, [UIntPtr]::Z
 `;
   const scriptPath = path.join(tmpDir, `hotkey_${vkCodes.join('_')}.ps1`);
   fs.writeFileSync(scriptPath, ps, 'utf8');
-  const { execFileSync } = require('child_process');
-  execFileSync('powershell', [
+  await execFileAsync('powershell', [
     '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath,
   ], { timeout: 5000 });
 }

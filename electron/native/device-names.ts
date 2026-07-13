@@ -7,6 +7,11 @@ export interface PnpDeviceInfo {
   name: string;
   instanceId: string;
   hardwareIds: string[];
+  // True for the USB composite/root node (InstanceId `USB\VID_..&PID_..` with no
+  // `&MI_`). Its BusReportedDeviceDesc is the device's iProduct string — the same
+  // product name Windows shows in Settings > Devices (e.g. "Keychron K6"), and it
+  // comes from the hardware descriptor so it survives a WinUSB driver swap.
+  isUsbRoot: boolean;
 }
 
 let pnpCache: { loadedAt: number; devices: PnpDeviceInfo[] } | null = null;
@@ -30,10 +35,20 @@ export function findPnpNameByVidPid(
 ): string | null {
   const { vid, pid } = vidPidTokens(vendorId, productId);
   const matches = (value: string) => value.includes(vid) && value.includes(pid);
+  const identityHit = (pnp: PnpDeviceInfo) =>
+    matches(pnp.instanceId) || pnp.hardwareIds.some(matches);
 
+  // 1. Prefer the USB root node's product name (matches Settings > Devices, and
+  //    is the real iProduct string even if it isn't in our "generic" list).
   for (const pnp of pnpDevices) {
-    const identityHit = matches(pnp.instanceId) || pnp.hardwareIds.some(matches);
-    if (!identityHit) continue;
+    if (!pnp.isUsbRoot || !identityHit(pnp)) continue;
+    const name = pnp.name?.trim();
+    if (name && !isGenericDeviceName(name)) return name;
+  }
+
+  // 2. Fall back to any non-generic name from the child HID nodes.
+  for (const pnp of pnpDevices) {
+    if (!identityHit(pnp)) continue;
     const name = pnp.name?.trim();
     if (name && !isGenericDeviceName(name)) return name;
   }
@@ -44,20 +59,29 @@ export async function loadPnpDevices(force = false): Promise<PnpDeviceInfo[]> {
   const now = Date.now();
   if (!force && pnpCache && now - pnpCache.loadedAt < 10000) return pnpCache.devices;
 
+  // Two sources of nodes:
+  //  - HID/Keyboard/Mouse class children: give us the functional interfaces.
+  //  - USB root nodes (InstanceId 'USB\VID_..&PID_..' without '&MI_'): carry the
+  //    iProduct product name in BusReportedDeviceDesc — what Settings shows.
+  // For each we prefer BusReportedDeviceDesc, then FriendlyName, then Name.
   const script = `
 $result = @()
-$classes = @('HIDClass', 'Keyboard', 'Mouse')
-foreach ($class in $classes) {
-  $items = Get-PnpDevice -Class $class -ErrorAction SilentlyContinue
-  foreach ($d in $items) {
-    $busName = (Get-PnpDeviceProperty -InputObject $d -KeyName 'DEVPKEY_Device_BusReportedDeviceDesc' -ErrorAction SilentlyContinue).Data
-    $friendlyName = $d.FriendlyName
-    $hardwareIds = (Get-PnpDeviceProperty -InputObject $d -KeyName 'DEVPKEY_Device_HardwareIds' -ErrorAction SilentlyContinue).Data
-    $result += [PSCustomObject]@{
-      Name = if ($busName) { $busName } elseif ($friendlyName) { $friendlyName } else { $d.Name }
-      InstanceId = $d.InstanceId
-      HardwareIds = @($hardwareIds)
-    }
+$nodes = @()
+foreach ($class in @('HIDClass','Keyboard','Mouse')) {
+  $nodes += Get-PnpDevice -Class $class -PresentOnly -ErrorAction SilentlyContinue
+}
+$nodes += Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
+  Where-Object { $_.InstanceId -like 'USB\\VID_*' -and $_.InstanceId -notlike '*MI_*' }
+foreach ($d in $nodes) {
+  $busName = (Get-PnpDeviceProperty -InputObject $d -KeyName 'DEVPKEY_Device_BusReportedDeviceDesc' -ErrorAction SilentlyContinue).Data
+  $friendlyName = $d.FriendlyName
+  $hardwareIds = (Get-PnpDeviceProperty -InputObject $d -KeyName 'DEVPKEY_Device_HardwareIds' -ErrorAction SilentlyContinue).Data
+  $isUsbRoot = ($d.InstanceId -like 'USB\\VID_*') -and ($d.InstanceId -notlike '*MI_*')
+  $result += [PSCustomObject]@{
+    Name = if ($busName) { $busName } elseif ($friendlyName) { $friendlyName } else { $d.Name }
+    InstanceId = $d.InstanceId
+    HardwareIds = @($hardwareIds)
+    IsUsbRoot = $isUsbRoot
   }
 }
 $result | ConvertTo-Json -Compress -Depth 4
@@ -78,6 +102,7 @@ $result | ConvertTo-Json -Compress -Depth 4
       hardwareIds: (Array.isArray(row.HardwareIds) ? row.HardwareIds : [row.HardwareIds])
         .filter(Boolean)
         .map((id: any) => String(id).toUpperCase()),
+      isUsbRoot: Boolean(row.IsUsbRoot),
     })).filter((row: PnpDeviceInfo) => row.instanceId.length > 0);
     pnpCache = { loadedAt: now, devices: mapped };
     return mapped;

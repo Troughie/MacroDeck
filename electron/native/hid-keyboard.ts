@@ -3,13 +3,27 @@ import type { Endpoint } from 'usb';
 import { diffBootReports, KeyDelta } from './boot-report';
 import { isBootKeyboardInterface } from './usb-device-id';
 
+// Reading uses libusb's default backend. Once a keyboard is dedicated (its
+// driver swapped to WinUSB by winusb-driver.ts), node-usb can open and claim it
+// directly — no backend switch is required.
+
 // How many times to auto-restart polling after a recoverable endpoint error
 // before giving up and surfacing it to the caller. The counter resets whenever a
 // report is received, so only sustained failures stop the reader.
 const MAX_POLL_RESTARTS = 5;
 
+// How long to wait for libusb's 'end' event (in-flight transfers canceled) after a
+// poll error before giving up on the lightweight restart and escalating to a full
+// device re-open. Some errors (e.g. LIBUSB_ERROR_NOT_FOUND on a wedged handle)
+// never emit 'end', which used to leave the poll dead forever → stuck key.
+const END_WATCHDOG_MS = 500;
+
 export interface KeyboardReader {
-  close(): void;
+  // Resolves once the USB interfaces are released and the device handle is closed.
+  // Awaiting this matters before a driver swap / device re-enumeration: if the
+  // app still holds the WinUSB handle, Windows can't tear the device down, and
+  // the user is forced to physically unplug/replug it.
+  close(): Promise<void>;
 }
 
 // Opens a keyboard already bound to WinUSB and streams key deltas.
@@ -64,7 +78,11 @@ export function openKeyboardReader(
       claimed.push(iface);
       pollEndpoint(inEp);
     } catch (err) {
-      onError(err as Error);
+      // Per-interface claim/detach failure — skip this interface. This is not a
+      // fatal error (another interface may claim). onError is reserved for the
+      // fatal "poll died" case so the caller can distinguish and re-open. If no
+      // interface can be claimed, we throw below and the caller retries.
+      console.warn('[hid-keyboard] interface claim failed:', (err as Error).message);
     }
   }
 
@@ -79,43 +97,87 @@ export function openKeyboardReader(
   function pollEndpoint(inEp: InEndpoint): void {
     let prev: Uint8Array | null = null;
     let restarts = 0;
+    let dataCount = 0;
 
     inEp.on('data', (data: Buffer) => {
       if (data.length < 8) return; // Phase 1: 8-byte boot keyboard report only
       restarts = 0; // healthy traffic resets the recovery budget
+      // DEBUG: log the first reports so we can see whether the poll delivers the
+      // key-up after a key-down, or dies after the first report.
+      if (dataCount < 30) {
+        console.log(
+          `[hid-keyboard] data #${++dataCount} len=${data.length} bytes=${data.subarray(0, 8).toString('hex')}`,
+        );
+      }
       const cur = Uint8Array.from(data.subarray(0, 8));
       for (const delta of diffBootReports(prev, cur)) onDelta(delta);
       prev = cur;
     });
 
     inEp.on('error', (err: Error) => {
+      // DEBUG: capture the exact libusb error + state at the moment the poll dies.
+      console.warn(
+        `[hid-keyboard] poll error: "${err.message}" errno=${(err as any).errno} closed=${closed} restarts=${restarts}`,
+      );
       if (closed) return;
-      // node-usb stops polling on error and emits 'end' once transfers cancel.
+
+      // Fire exactly one recovery path. Fast path: node-usb emits 'end' once it
+      // finishes canceling transfers → lightweight poll restart. Fallback: if 'end'
+      // never arrives (a wedged handle), a watchdog escalates to a full re-open via
+      // onError so the reader can't stay silently dead.
+      let settled = false;
+
       inEp.once('end', () => {
-        if (closed) return;
+        if (settled || closed) return;
+        settled = true;
         if (restarts >= MAX_POLL_RESTARTS) {
+          console.error('[hid-keyboard] poll restarts exhausted → surfacing to onError (self-heal)');
           onError(err);
           return;
         }
         restarts++;
+        console.warn(`[hid-keyboard] restarting poll, attempt ${restarts}/${MAX_POLL_RESTARTS}`);
         try {
           inEp.startPoll(3, inEp.descriptor.wMaxPacketSize);
         } catch (restartErr) {
+          console.error('[hid-keyboard] restart threw:', (restartErr as Error).message);
           onError(restartErr as Error);
         }
       });
+
+      setTimeout(() => {
+        if (settled || closed) return;
+        settled = true;
+        console.error(`[hid-keyboard] no "end" within ${END_WATCHDOG_MS}ms of error → self-heal re-open`);
+        onError(err);
+      }, END_WATCHDOG_MS);
     });
 
     inEp.startPoll(3, inEp.descriptor.wMaxPacketSize);
   }
 
   return {
-    close() {
+    async close() {
       closed = true;
-      for (const iface of claimed) {
-        try { iface.release(true, () => { /* ignore */ }); } catch { /* ignore */ }
-      }
-      try { device.close(); } catch { /* ignore */ }
+      console.log(`[hid-keyboard] close() start — releasing ${claimed.length} interface(s)`);
+      // Release each claimed interface and WAIT for libusb's callback before
+      // closing the device — release(closeEndpoints, cb) is asynchronous, and
+      // closing / letting Windows re-enumerate while a transfer is still being
+      // torn down leaves the WinUSB handle open (forcing a physical replug).
+      await Promise.all(
+        claimed.map(
+          (iface) =>
+            new Promise<void>((resolve) => {
+              try {
+                iface.release(true, () => resolve());
+              } catch {
+                resolve();
+              }
+            }),
+        ),
+      );
+      try { device.close(); } catch (err) { console.warn('[hid-keyboard] device.close() threw:', (err as Error).message); }
+      console.log('[hid-keyboard] close() done');
     },
   };
 }

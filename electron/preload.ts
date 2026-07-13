@@ -19,10 +19,24 @@ const electronAPI = {
       ipcRenderer.invoke('keyboard:select', deviceId),
     updateMacroKeys: (keyCodes: string[]): Promise<boolean> =>
       ipcRenderer.invoke('keyboard:updateMacroKeys', keyCodes),
+    driverStatus: (): Promise<{ available: boolean }> =>
+      ipcRenderer.invoke('keyboard:driverStatus'),
+    dedicate: (deviceId: string): Promise<{ ok: boolean; exitCode?: number | null; error?: string; log?: string }> =>
+      ipcRenderer.invoke('keyboard:dedicate', deviceId),
+    undedicate: (deviceId: string): Promise<{ ok: boolean; exitCode?: number | null; error?: string; log?: string }> =>
+      ipcRenderer.invoke('keyboard:undedicate', deviceId),
     onKeyEvent: (callback: (event: KeyEvent) => void) => {
       const handler = (_: Electron.IpcRendererEvent, event: KeyEvent) => callback(event);
       ipcRenderer.on('keyboard:event', handler);
       return () => ipcRenderer.removeListener('keyboard:event', handler);
+    },
+    // Fired when the main-process reader is torn down / replaced, so the renderer
+    // can clear any keys it still thinks are held (their key-up was lost with the
+    // old reader). Prevents a stuck-highlighted key on the visualizer.
+    onFlush: (callback: () => void) => {
+      const handler = () => callback();
+      ipcRenderer.on('keyboard:flush', handler);
+      return () => ipcRenderer.removeListener('keyboard:flush', handler);
     },
   },
 

@@ -3,10 +3,13 @@
  * Source is embedded as a string to avoid __dirname path issues.
  */
 
-import { execFileSync } from 'child_process';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+
+const execFileAsync = promisify(execFile);
 
 const tmpDir = path.join(os.tmpdir(), 'macrodeck');
 const exePath = path.join(tmpDir, 'AppVolume.exe');
@@ -191,7 +194,7 @@ class AppVolume {
 
 let compiled = false;
 
-export function ensureAppVolumeExe(): string {
+export async function ensureAppVolumeExe(): Promise<string> {
     if (compiled && fs.existsSync(exePath)) return exePath;
 
     if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
@@ -210,15 +213,18 @@ export function ensureAppVolumeExe(): string {
     // Delete stale exe
     if (fs.existsSync(exePath)) fs.unlinkSync(exePath);
 
-    execFileSync(csc, ['/nologo', `/out:${exePath}`, '/r:System.dll', srcPath],
-        { timeout: 30000, stdio: 'pipe' });
+    // Async so the Electron main thread (which also drives libusb keyboard
+    // polling) is never blocked while csc compiles.
+    await execFileAsync(csc, ['/nologo', `/out:${exePath}`, '/r:System.dll', srcPath],
+        { timeout: 30000 });
 
     compiled = true;
     console.log('[appvolume] Compiled AppVolume.exe');
     return exePath;
 }
 
-export function runAppVolume(args: string[]): string {
-    const exe = ensureAppVolumeExe();
-    return execFileSync(exe, args, { timeout: 5000 }).toString().trim();
+export async function runAppVolume(args: string[]): Promise<string> {
+    const exe = await ensureAppVolumeExe();
+    const { stdout } = await execFileAsync(exe, args, { timeout: 5000 });
+    return stdout.toString().trim();
 }

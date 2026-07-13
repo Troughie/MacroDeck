@@ -1,12 +1,12 @@
 import { ipcMain } from 'electron';
-import { exec, spawn } from 'child_process';
+import { exec, execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import { app } from 'electron';
-import { execFileSync } from 'child_process';
 import { AudioSession } from '../../src/types/macro.types';
 import { runAppVolume, ensureAppVolumeExe } from '../native/appvolume';
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 // ─── Get audio sessions via AppVolume.exe ────────────────────────────────────
 
@@ -82,10 +82,11 @@ async function getExePathsByPids(pids: number[]): Promise<Map<number, string>> {
 
   try {
     const pidList = pids.join(',');
-    const out = execFileSync('powershell', [
+    const { stdout } = await execFileAsync('powershell', [
       '-NoProfile', '-NonInteractive', '-Command',
       `Get-Process -Id ${pidList} -ErrorAction SilentlyContinue | Select-Object Id,Path | ConvertTo-Json -Compress`
-    ], { timeout: 3000 }).toString().trim();
+    ], { timeout: 3000 });
+    const out = stdout.toString().trim();
 
     if (!out) return result;
 
@@ -130,7 +131,7 @@ async function enrichWithIcons(sessions: AudioSession[]): Promise<AudioSession[]
 }
 async function getAudioSessions(): Promise<AudioSession[]> {
   try {
-    const out = runAppVolume(['list']);
+    const out = await runAppVolume(['list']);
     const raw = JSON.parse(out);
     const items = Array.isArray(raw) ? raw : [raw];
     return items.map((item: any) => ({
@@ -177,7 +178,7 @@ interface MuteResult {
 
 async function setVolume(target: string, volume: number): Promise<VolumeResult | null> {
   try {
-    const out = runAppVolume(['set-volume', target, String(Math.max(0, Math.min(100, volume)))]);
+    const out = await runAppVolume(['set-volume', target, String(Math.max(0, Math.min(100, volume)))]);
     return JSON.parse(out) as VolumeResult;
   } catch (err: any) {
     console.error('[audio.ipc] setVolume failed:', err.message?.slice(0, 80));
@@ -188,7 +189,7 @@ async function setVolume(target: string, volume: number): Promise<VolumeResult |
 async function adjustVolume(target: string, delta: number, mode: 'increase' | 'decrease'): Promise<VolumeResult | null> {
   try {
     const cmd = mode === 'increase' ? 'volume-up' : 'volume-down';
-    const out = runAppVolume([cmd, target, String(delta)]);
+    const out = await runAppVolume([cmd, target, String(delta)]);
     return JSON.parse(out) as VolumeResult;
   } catch (err: any) {
     console.error('[audio.ipc] adjustVolume failed:', err.message?.slice(0, 80));
@@ -200,7 +201,7 @@ async function adjustVolume(target: string, delta: number, mode: 'increase' | 'd
 
 async function toggleMute(target: string): Promise<MuteResult | null> {
   try {
-    const out = runAppVolume(['toggle-mute', target]);
+    const out = await runAppVolume(['toggle-mute', target]);
     return JSON.parse(out) as MuteResult;
   } catch (err: any) {
     console.error('[audio.ipc] toggleMute failed:', err.message?.slice(0, 80));

@@ -1,9 +1,12 @@
 import { ipcMain } from 'electron';
-import { execFileSync } from 'child_process';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import path from 'path';
 import { app } from 'electron';
 import fs from 'fs';
 import os from 'os';
+
+const execFileAsync = promisify(execFile);
 import { InstalledApp } from '../../src/types/macro.types';
 
 // ─── Tmp dir ──────────────────────────────────────────────────────────────────
@@ -336,13 +339,12 @@ async function getInstalledApps(): Promise<InstalledApp[]> {
     const scriptPath = path.join(tmpDir, 'get-apps.ps1');
     fs.writeFileSync(scriptPath, PS_SCRIPT, 'utf8');
 
-    const stdout = execFileSync(
+    const { stdout: rawStdout } = await execFileAsync(
       'powershell',
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath],
       { timeout: 45_000, maxBuffer: 20 * 1024 * 1024 },
-    )
-      .toString()
-      .trim();
+    );
+    const stdout = rawStdout.toString().trim();
 
     if (!stdout) return getFallback();
 
