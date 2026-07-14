@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron';
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs';
@@ -102,7 +102,24 @@ export async function executeAeScript(jsx: string): Promise<void> {
   // Overwriting is safe since macros run serially.
   const scriptPath = path.join(tmpDir, 'ae_current_script.jsx');
   fs.writeFileSync(scriptPath, jsx, 'utf8');
-  await execFileAsync(aePath, ['-r', scriptPath], { timeout: 15000 });
+
+  // Use spawn (not execFileAsync): when AE is already running, "AfterFX.exe -r"
+  // hands the script to the live instance and exits with a NON-ZERO code even
+  // though the script runs fine. AE also reads the file asynchronously after the
+  // CLI process exits, so the exit code is meaningless here. We only fail if the
+  // process can't be launched at all (e.g. exe missing / bad path).
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(aePath, ['-r', scriptPath], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    child.on('error', reject); // ENOENT etc.
+    child.on('spawn', () => {
+      child.unref();
+      resolve();
+    });
+  });
 }
 
 // ─── IPC Registration ─────────────────────────────────────────────────────────
