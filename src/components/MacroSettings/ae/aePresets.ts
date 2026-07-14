@@ -25,7 +25,11 @@ export const AE_PRESETS: AePreset[] = [
     category: 'layer',
     description: 'Moves anchor point to center of each selected layer',
     jsx: `var comp = app.project.activeItem;
-if (comp && comp instanceof CompItem) {
+if (!comp || !(comp instanceof CompItem)) {
+  alert("Open a composition first.");
+} else if (comp.selectedLayers.length === 0) {
+  alert("Select one or more layers first.");
+} else {
   app.beginUndoGroup("Center Anchor Point");
   var sel = comp.selectedLayers;
   for (var i = 0; i < sel.length; i++) {

@@ -644,9 +644,10 @@ export async function executeMacro(macro: MacroConfig): Promise<boolean> {
           } else {
             // ── Script mode: resolve JSX and run via afterfx.exe -r ───────
             let jsx: string;
-            if (s.scriptType === 'preset') {
+            // Default to 'preset' when unset, matching the settings UI default.
+            if (s.scriptType !== 'custom') {
               const preset = AE_PRESETS.find(p => p.id === s.presetId);
-              if (!preset) throw new Error(`Unknown AE preset: ${s.presetId}`);
+              if (!preset) throw new Error(`No preset selected.`);
               jsx = preset.jsx;
             } else {
               if (!s.script?.trim()) throw new Error('No JSX script configured.');
