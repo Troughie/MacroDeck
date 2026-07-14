@@ -80,3 +80,40 @@ export function isPanelAlive(now: number = Date.now()): boolean {
   if (!hb) return false;
   return now - hb.ts <= HEARTBEAT_MAX_AGE_MS;
 }
+
+// ─── Full execution flow ────────────────────────────────────────────────────────
+
+export interface ExecuteViaPanelOptions {
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+  pollIntervalMs?: number;
+  timeoutMs?: number;
+}
+
+const PANEL_NOT_OPEN =
+  'Open the MacroDeck panel in After Effects first (Window → Extensions → MacroDeck).';
+
+export async function executeViaPanel(jsx: string, opts: ExecuteViaPanelOptions = {}): Promise<void> {
+  const now = opts.now ?? Date.now;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)));
+  const pollIntervalMs = opts.pollIntervalMs ?? 50;
+  const timeoutMs = opts.timeoutMs ?? 5000;
+
+  if (!isPanelAlive(now())) {
+    throw new Error(PANEL_NOT_OPEN); // NO CLI fallback (by design)
+  }
+
+  const id = genRequestId(now());
+  writeRequest(id, jsx, now());
+
+  const deadline = now() + timeoutMs;
+  while (now() < deadline) {
+    const res = readResponse();
+    if (res && res.id === id) {
+      if (res.ok) return;
+      throw new Error(res.error || 'After Effects script error');
+    }
+    await sleep(pollIntervalMs);
+  }
+  throw new Error('After Effects not responding (timeout).');
+}

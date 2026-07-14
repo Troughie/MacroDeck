@@ -101,3 +101,69 @@ describe('heartbeat + liveness', () => {
     expect(isPanelAlive(10_000)).toBe(false);
   });
 });
+
+import { executeViaPanel } from './ae-bridge';
+
+describe('executeViaPanel', () => {
+  const dir = path.join(os.tmpdir(), 'macrodeck', 'ae_bridge');
+  beforeEach(() => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} });
+  afterEach(() => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} });
+
+  const writeFreshHeartbeat = (ts: number) => {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'heartbeat.json'),
+      JSON.stringify({ alive: true, aeVersion: '24.0', ts }), 'utf8');
+  };
+
+  it('throws a panel-not-open error when heartbeat is stale', async () => {
+    await expect(executeViaPanel('alert(1);', { now: () => 100000 }))
+      .rejects.toThrow(/panel/i);
+  });
+
+  it('resolves when a matching ok response appears', async () => {
+    writeFreshHeartbeat(0);
+    // Simulate the panel: after the request is written, drop a matching response.
+    const opts = {
+      now: () => 0,
+      sleep: async () => {
+        const reqRaw = fs.readFileSync(path.join(dir, 'request.json'), 'utf8');
+        const req = JSON.parse(reqRaw);
+        fs.writeFileSync(path.join(dir, 'response.json'),
+          JSON.stringify({ id: req.id, ok: true, error: null, ts: 1 }), 'utf8');
+      },
+      pollIntervalMs: 1,
+      timeoutMs: 5000,
+    };
+    await expect(executeViaPanel('alert(1);', opts)).resolves.toBeUndefined();
+  });
+
+  it('throws the AE error when the panel reports ok:false', async () => {
+    writeFreshHeartbeat(0);
+    const opts = {
+      now: () => 0,
+      sleep: async () => {
+        const req = JSON.parse(fs.readFileSync(path.join(dir, 'request.json'), 'utf8'));
+        fs.writeFileSync(path.join(dir, 'response.json'),
+          JSON.stringify({ id: req.id, ok: false, error: 'undefined is not an object', ts: 1 }), 'utf8');
+      },
+      pollIntervalMs: 1,
+      timeoutMs: 5000,
+    };
+    await expect(executeViaPanel('boom', opts)).rejects.toThrow(/undefined is not an object/);
+  });
+
+  it('ignores a stale response with a non-matching id then times out', async () => {
+    writeFreshHeartbeat(0);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'response.json'),
+      JSON.stringify({ id: 'OLD', ok: true, error: null, ts: 1 }), 'utf8');
+    let clock = 0;
+    const opts = {
+      now: () => clock,
+      sleep: async () => { clock += 1000; }, // advance time each poll, no matching response ever written
+      pollIntervalMs: 1000,
+      timeoutMs: 5000,
+    };
+    await expect(executeViaPanel('x', opts)).rejects.toThrow(/not responding|timeout/i);
+  });
+});
