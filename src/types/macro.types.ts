@@ -7,7 +7,9 @@ export type MacroType =
   | 'MUTE_TOGGLE'
   | 'VOLUME_ADJUST'
   | 'HOTKEY'
-  | 'PROFILE_SWITCH';
+  | 'PROFILE_SWITCH'
+  | 'FORCE_QUIT'
+  | 'AE_COMMAND';
 
 // ─── Settings Interfaces ─────────────────────────────────────────────────────
 
@@ -55,6 +57,22 @@ export interface ProfileSwitchSettings extends BaseSettings {
   targetProfileId?: string;            // used when mode === 'specific'
 }
 
+// Force-quits (kills) the app that owns the foreground window — like macOS
+// Force Quit / Task Manager's End Task. Kills the whole process tree.
+// There is nothing to configure per key, so settings only carry the display name.
+export interface ForceQuitSettings extends BaseSettings {
+  // Reserved for a future "specific app" target mode; unused for foreground kill.
+  target?: 'foreground';
+}
+
+export interface AeCommandSettings extends BaseSettings {
+  mode: 'shortcut' | 'script';
+  shortcutId?: string;       // used when mode === 'shortcut', e.g. 'timeline.ramPreview'
+  scriptType?: 'preset' | 'custom'; // used when mode === 'script'
+  presetId?: string;         // used when mode === 'script' && scriptType === 'preset'
+  script?: string;           // used when mode === 'script' && scriptType === 'custom'
+}
+
 export type MacroSettings =
   | AppLaunchSettings
   | WebLinkSettings
@@ -62,7 +80,9 @@ export type MacroSettings =
   | MuteSettings
   | VolumeSettings
   | HotkeySettings
-  | ProfileSwitchSettings;
+  | ProfileSwitchSettings
+  | ForceQuitSettings
+  | AeCommandSettings;
 
 // ─── Profile ──────────────────────────────────────────────────────────────────
 
@@ -251,5 +271,19 @@ export const MACRO_TYPE_INFO: MacroTypeInfo[] = [
     description: 'Switch to another profile',
     icon: 'Layers',
     color: '#a855f7',
+  },
+  {
+    type: 'FORCE_QUIT',
+    label: 'Force Quit',
+    description: 'Kill the app in focus (End Task)',
+    icon: 'Skull',
+    color: '#dc2626',
+  },
+  {
+    type: 'AE_COMMAND',
+    label: 'After Effects',
+    description: 'AE shortcuts and JSX scripts',
+    icon: 'Clapperboard',
+    color: '#9999FF',
   },
 ];
