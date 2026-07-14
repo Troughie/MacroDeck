@@ -276,15 +276,28 @@ using System.Threading;
 class HotkeySender {
     [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
     const uint KEYEVENTF_KEYUP = 2;
+    const uint KEYEVENTF_EXTENDEDKEY = 1;
+    static bool IsExtended(byte vk) {
+        return vk == 0x21 || vk == 0x22 || vk == 0x23 || vk == 0x24 ||
+               vk == 0x25 || vk == 0x26 || vk == 0x27 || vk == 0x28 ||
+               vk == 0x2D || vk == 0x2E || vk == 0x5B || vk == 0x5C ||
+               vk == 0x5D || vk == 0x6F;
+    }
     static void Main(string[] args) {
         if (args.Length == 0) return;
         byte[] vks = new byte[args.Length];
         for (int i = 0; i < args.Length; i++) vks[i] = byte.Parse(args[i]);
-        // Press all keys down
-        foreach (byte vk in vks) { keybd_event(vk, 0, 0, UIntPtr.Zero); Thread.Sleep(10); }
+        foreach (byte vk in vks) {
+            uint flags = IsExtended(vk) ? KEYEVENTF_EXTENDEDKEY : 0u;
+            keybd_event(vk, 0, flags, UIntPtr.Zero);
+            Thread.Sleep(10);
+        }
         Thread.Sleep(30);
-        // Release all keys in reverse
-        for (int i = vks.Length - 1; i >= 0; i--) { keybd_event(vks[i], 0, KEYEVENTF_KEYUP, UIntPtr.Zero); Thread.Sleep(10); }
+        for (int i = vks.Length - 1; i >= 0; i--) {
+            uint flags = IsExtended(vks[i]) ? (KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP) : KEYEVENTF_KEYUP;
+            keybd_event(vks[i], 0, flags, UIntPtr.Zero);
+            Thread.Sleep(10);
+        }
     }
 }`;
 
@@ -337,6 +350,7 @@ async function executeHotkey(settings: HotkeySettings): Promise<void> {
 
   // Fallback: PowerShell for combos
   ensureTmpDir();
+  const EXTENDED_VK_SET = new Set([0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x2D, 0x2E, 0x5B, 0x5C, 0x5D, 0x6F]);
   const ps = `
 Add-Type -TypeDefinition @"
 using System;
@@ -345,9 +359,9 @@ public class KS2 {
   [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte sc, uint fl, UIntPtr ex);
 }
 "@
-${vkCodes.map(vk => `[KS2]::keybd_event(${vk}, 0, 0, [UIntPtr]::Zero)`).join('\n')}
+${vkCodes.map(vk => `[KS2]::keybd_event(${vk}, 0, ${EXTENDED_VK_SET.has(vk) ? 1 : 0}, [UIntPtr]::Zero)`).join('\n')}
 Start-Sleep -Milliseconds 30
-${[...vkCodes].reverse().map(vk => `[KS2]::keybd_event(${vk}, 0, 2, [UIntPtr]::Zero)`).join('\n')}
+${[...vkCodes].reverse().map(vk => `[KS2]::keybd_event(${vk}, 0, ${EXTENDED_VK_SET.has(vk) ? 3 : 2}, [UIntPtr]::Zero)`).join('\n')}
 `;
   const scriptPath = path.join(tmpDir, `hotkey_${vkCodes.join('_')}.ps1`);
   fs.writeFileSync(scriptPath, ps, 'utf8');

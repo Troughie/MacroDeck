@@ -14,18 +14,24 @@ function ensureTmpDir() {
 
 // ─── AE Path Detection ────────────────────────────────────────────────────────
 
-const AE_DEFAULT_ROOTS = [
-  'C:\\Program Files\\Adobe',
-  'C:\\Program Files (x86)\\Adobe',
-];
+const AE_YEARS = ['2025', '2024', '2023', '2022', '2021', '2020', '2026'];
 
-const AE_YEARS = ['2024', '2023', '2022', '2021', '2020', '2025', '2026'];
+function getSystemDrives(): string[] {
+  const drives: string[] = [];
+  for (let i = 65; i <= 90; i++) { // A–Z
+    const d = `${String.fromCharCode(i)}:\\`;
+    try { if (fs.existsSync(d)) drives.push(d); } catch { /* skip */ }
+  }
+  return drives;
+}
 
 function findAeExeByFilesystem(): string | null {
-  for (const root of AE_DEFAULT_ROOTS) {
-    for (const year of AE_YEARS) {
-      const candidate = path.join(root, `After Effects ${year}`, 'Support Files', 'AfterFX.exe');
-      if (fs.existsSync(candidate)) return candidate;
+  for (const drive of getSystemDrives()) {
+    for (const root of ['Program Files', 'Program Files (x86)']) {
+      for (const year of AE_YEARS) {
+        const candidate = path.join(drive, root, 'Adobe', `After Effects ${year}`, 'Support Files', 'AfterFX.exe');
+        if (fs.existsSync(candidate)) return candidate;
+      }
     }
   }
   return null;
@@ -44,8 +50,14 @@ async function findAeExeByRegistry(): Promise<string | null> {
       const match = line.match(/InstallPath\s+REG_SZ\s+(.+)/i);
       if (match) {
         const installPath = match[1].trim();
-        const exe = path.join(installPath, 'Support Files', 'AfterFX.exe');
-        if (fs.existsSync(exe)) return exe;
+        // InstallPath may or may not end with "Support Files\" depending on AE version
+        const candidates = [
+          path.join(installPath, 'AfterFX.exe'),
+          path.join(installPath, 'Support Files', 'AfterFX.exe'),
+        ];
+        for (const exe of candidates) {
+          if (fs.existsSync(exe)) return exe;
+        }
       }
     }
   } catch {
