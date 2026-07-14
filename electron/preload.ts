@@ -70,6 +70,12 @@ const electronAPI = {
       ipcRenderer.invoke('ae:detect'),
     execute: (jsx: string): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke('ae:execute', jsx),
+    install: (): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('ae:install'),
+    uninstall: (): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('ae:uninstall'),
+    panelStatus: (): Promise<{ installed: boolean; alive: boolean; aeVersion?: string }> =>
+      ipcRenderer.invoke('ae:panel-status'),
   },
 
   // ── Store ─────────────────────────────────────────────────────────────────
