@@ -1,9 +1,11 @@
-import { ipcMain } from 'electron';
+import { ipcMain, app } from 'electron';
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import { executeViaPanel } from './ae-bridge';
+import { install as installPanel, uninstall as uninstallPanel, panelStatus } from './ae-install';
 
 const execFileAsync = promisify(execFile);
 const tmpDir = path.join(os.tmpdir(), 'macrodeck');
@@ -80,45 +82,29 @@ export async function detectAfterEffects(): Promise<{ found: boolean; path: stri
 
 // ─── JSX Script Execution ─────────────────────────────────────────────────────
 
+// Route every script through the resident CEP panel — this runs the JSX inside
+// AE with NO window activation (no flicker/shrink). If the panel is not open,
+// error out with a clear message. No CLI fallback (by design).
 export async function executeAeScript(jsx: string): Promise<void> {
+  await executeViaPanel(jsx);
+}
+
+// Legacy CLI path (kept for reference/debugging — no longer called). Runs
+// "AfterFX.exe -r <script>", which re-activates the AE window.
+export async function executeAeScriptViaCli(jsx: string): Promise<void> {
   const { found, path: aePath } = await detectAfterEffects();
   if (!found || !aePath) {
     throw new Error('After Effects not found. Install AE or set the path manually.');
   }
-
-  // Check if AE process is running (avoids spawning a second instance)
-  try {
-    const { stdout: tasklistOut } = await execFileAsync('tasklist', ['/FI', 'IMAGENAME eq AfterFX.exe', '/NH'], { timeout: 3000, windowsHide: true } as any);
-    if (!String(tasklistOut).toLowerCase().includes('afterfx.exe')) {
-      throw new Error('After Effects is not running. Open AE first.');
-    }
-  } catch (err: any) {
-    if (err?.message?.includes('not running')) throw err;
-    // tasklist failed (non-Windows or command error) — proceed
-  }
-
   ensureTmpDir();
-  // Fixed filename — AE reads it after the CLI exits, so don't delete it.
-  // Overwriting is safe since macros run serially.
   const scriptPath = path.join(tmpDir, 'ae_current_script.jsx');
   fs.writeFileSync(scriptPath, jsx, 'utf8');
-
-  // Use spawn (not execFileAsync): when AE is already running, "AfterFX.exe -r"
-  // hands the script to the live instance and exits with a NON-ZERO code even
-  // though the script runs fine. AE also reads the file asynchronously after the
-  // CLI process exits, so the exit code is meaningless here. We only fail if the
-  // process can't be launched at all (e.g. exe missing / bad path).
   await new Promise<void>((resolve, reject) => {
     const child = spawn(aePath, ['-r', scriptPath], {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true,
+      detached: true, stdio: 'ignore', windowsHide: true,
     });
-    child.on('error', reject); // ENOENT etc.
-    child.on('spawn', () => {
-      child.unref();
-      resolve();
-    });
+    child.on('error', reject);
+    child.on('spawn', () => { child.unref(); resolve(); });
   });
 }
 
@@ -137,5 +123,21 @@ export function registerAeIpc(): void {
     } catch (err: any) {
       return { ok: false, error: err.message?.slice(0, 120) };
     }
+  });
+
+  ipcMain.handle('ae:install', async (): Promise<{ ok: boolean; error?: string }> => {
+    return installPanel({
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      appPath: process.cwd(),
+    });
+  });
+
+  ipcMain.handle('ae:uninstall', async (): Promise<{ ok: boolean; error?: string }> => {
+    return uninstallPanel();
+  });
+
+  ipcMain.handle('ae:panel-status', async (): Promise<{ installed: boolean; alive: boolean; aeVersion?: string }> => {
+    return panelStatus();
   });
 }
