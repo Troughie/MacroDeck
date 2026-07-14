@@ -23,7 +23,7 @@ export const AE_PRESETS: AePreset[] = [
     id: 'layer.centerAnchor',
     label: 'Center Anchor Point',
     category: 'layer',
-    description: 'Moves anchor point to center of each selected layer',
+    description: 'Centers the anchor point of each selected layer without moving it',
     jsx: `var comp = app.project.activeItem;
 if (!comp || !(comp instanceof CompItem)) {
   alert("Open a composition first.");
@@ -31,13 +31,24 @@ if (!comp || !(comp instanceof CompItem)) {
   alert("Select one or more layers first.");
 } else {
   app.beginUndoGroup("Center Anchor Point");
-  var sel = comp.selectedLayers;
-  for (var i = 0; i < sel.length; i++) {
-    var layer = sel[i];
-    var src = layer.source;
-    if (src) {
-      layer.anchorPoint.setValue([src.width / 2, src.height / 2]);
-      layer.position.setValue([comp.width / 2, comp.height / 2]);
+  // AE's built-in command centers the anchor within the layer's real content
+  // bounds and compensates position so the layer stays put — works for
+  // footage, solids, precomps, shape layers and text layers alike.
+  var cmd = app.findMenuCommandId("Center Anchor Point in Layer Content");
+  if (cmd) {
+    app.executeCommand(cmd);
+  } else {
+    // Fallback (older AE): compute bounds manually per layer.
+    var sel = comp.selectedLayers;
+    for (var i = 0; i < sel.length; i++) {
+      var layer = sel[i];
+      var src = layer.source;
+      if (src) {
+        layer.anchorPoint.setValue([src.width / 2, src.height / 2]);
+      } else if (layer.sourceRectAtTime) {
+        var r = layer.sourceRectAtTime(comp.time, false);
+        layer.anchorPoint.setValue([r.left + r.width / 2, r.top + r.height / 2]);
+      }
     }
   }
   app.endUndoGroup();
@@ -110,16 +121,27 @@ if (comp && comp instanceof CompItem) {
     category: 'layer',
     description: 'Scales selected layers to fill the composition (preserves aspect ratio)',
     jsx: `var comp = app.project.activeItem;
-if (comp && comp instanceof CompItem) {
+if (!comp || !(comp instanceof CompItem)) {
+  alert("Open a composition first.");
+} else if (comp.selectedLayers.length === 0) {
+  alert("Select one or more layers first.");
+} else {
   app.beginUndoGroup("Fit Layer to Comp");
   var sel = comp.selectedLayers;
   for (var i = 0; i < sel.length; i++) {
     var layer = sel[i];
+    var w, h;
     var src = layer.source;
     if (src) {
-      var scaleX = (comp.width / src.width) * 100;
-      var scaleY = (comp.height / src.height) * 100;
-      var scale = Math.min(scaleX, scaleY);
+      w = src.width; h = src.height;
+    } else if (layer.sourceRectAtTime) {
+      var r = layer.sourceRectAtTime(comp.time, false);
+      w = r.width; h = r.height;
+    } else {
+      continue;
+    }
+    if (w > 0 && h > 0) {
+      var scale = Math.min((comp.width / w) * 100, (comp.height / h) * 100);
       layer.transform.scale.setValue([scale, scale]);
       layer.transform.position.setValue([comp.width / 2, comp.height / 2]);
     }
