@@ -58,3 +58,46 @@ describe('writeRequest / readResponse round-trip', () => {
     expect(readResponse()).toEqual({ id: 'req_1_x', ok: true, error: null, ts: 9 });
   });
 });
+
+import { readHeartbeat, isPanelAlive, HEARTBEAT_MAX_AGE_MS } from './ae-bridge';
+
+describe('heartbeat + liveness', () => {
+  const dir = path.join(os.tmpdir(), 'macrodeck', 'ae_bridge');
+  beforeEach(() => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} });
+  afterEach(() => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} });
+
+  const writeHb = (ts: number, aeVersion = '24.0') => {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'heartbeat.json'),
+      JSON.stringify({ alive: true, aeVersion, ts }), 'utf8');
+  };
+
+  it('threshold constant is 3s', () => {
+    expect(HEARTBEAT_MAX_AGE_MS).toBe(3000);
+  });
+
+  it('readHeartbeat returns null when missing', () => {
+    expect(readHeartbeat()).toBeNull();
+  });
+
+  it('readHeartbeat returns null on corrupt JSON', () => {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'heartbeat.json'), 'nope', 'utf8');
+    expect(readHeartbeat()).toBeNull();
+  });
+
+  it('isPanelAlive is true when heartbeat ts is within 3s of now', () => {
+    writeHb(10_000);
+    expect(isPanelAlive(10_500)).toBe(true);
+    expect(isPanelAlive(12_999)).toBe(true);
+  });
+
+  it('isPanelAlive is false when heartbeat is older than 3s', () => {
+    writeHb(10_000);
+    expect(isPanelAlive(13_001)).toBe(false);
+  });
+
+  it('isPanelAlive is false when heartbeat is missing', () => {
+    expect(isPanelAlive(10_000)).toBe(false);
+  });
+});

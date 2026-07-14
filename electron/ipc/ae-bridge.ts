@@ -51,3 +51,32 @@ export function readResponse(): BridgeResponse | null {
     return null; // missing file or corrupt JSON — treat as no response
   }
 }
+
+// ─── Heartbeat + liveness ───────────────────────────────────────────────────────
+
+export const HEARTBEAT_MAX_AGE_MS = 3000;
+
+export interface BridgeHeartbeat {
+  alive: boolean;
+  aeVersion?: string;
+  ts: number;
+}
+
+export function readHeartbeat(): BridgeHeartbeat | null {
+  try {
+    const raw = fs.readFileSync(heartbeatPath(), 'utf8');
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.ts === 'number') return parsed as BridgeHeartbeat;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// Panel is "alive" if a heartbeat exists and its ts is within 3s of now.
+// The 3s window tolerates slow poll cycles during heavy AE renders.
+export function isPanelAlive(now: number = Date.now()): boolean {
+  const hb = readHeartbeat();
+  if (!hb) return false;
+  return now - hb.ts <= HEARTBEAT_MAX_AGE_MS;
+}
