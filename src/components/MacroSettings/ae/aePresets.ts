@@ -196,7 +196,7 @@ if (comp && comp instanceof CompItem) {
       "  amp = 0.07; freq = 2.5; decay = 8;",
       "  value + v * amp * Math.sin(freq * 2 * Math.PI * t) * Math.exp(-decay * t);",
       "} else { value; }"
-    ].join("\\n");
+    ].join("\n");
     app.endUndoGroup();
   } else {
     alert("Select a property in the timeline first.");
