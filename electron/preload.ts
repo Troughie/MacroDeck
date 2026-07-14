@@ -64,6 +64,14 @@ const electronAPI = {
       ipcRenderer.invoke('macro:execute', macro),
   },
 
+  // ── After Effects ──────────────────────────────────────────────────────────
+  ae: {
+    detect: (): Promise<{ found: boolean; path: string | null }> =>
+      ipcRenderer.invoke('ae:detect'),
+    execute: (jsx: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('ae:execute', jsx),
+  },
+
   // ── Store ─────────────────────────────────────────────────────────────────
   store: {
     saveMacros: (macros: Record<string, MacroConfig>): Promise<boolean> =>

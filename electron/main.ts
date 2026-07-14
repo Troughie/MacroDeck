@@ -7,6 +7,7 @@ import { registerAppsIpc } from './ipc/apps.ipc';
 import { registerAudioIpc } from './ipc/audio.ipc';
 import { registerMacroIpc } from './ipc/macro.ipc';
 import { registerSystemIpc, setWindowsStartup } from './ipc/system.ipc';
+import { registerAeIpc } from './ipc/ae.ipc';
 import { ensureAppVolumeExe } from './native/appvolume';
 import { createNotificationWindow, registerNotificationIpc } from './notification-window';
 import { installFileLogger } from './debug-log';
@@ -223,6 +224,7 @@ app.whenReady().then(() => {
   registerAudioIpc();
   registerMacroIpc(store, mainWindow);
   registerSystemIpc(store, mainWindow, updateTrayMenu);
+  registerAeIpc();
   registerNotificationIpc();
 
   app.on('activate', () => {
