@@ -3,12 +3,12 @@ import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import {
   Rocket, Globe, Music, VolumeX, Volume2, Keyboard, Layers,
-  GripVertical,
+  Skull, GripVertical, Clapperboard,
 } from 'lucide-react';
 import { MacroTypeInfo } from '../../types/macro.types';
 
 const ICON_MAP: Record<string, React.ComponentType<any>> = {
-  Rocket, Globe, Music, VolumeX, Volume2, Keyboard, Layers,
+  Rocket, Globe, Music, VolumeX, Volume2, Keyboard, Layers, Skull, Clapperboard,
 };
 
 interface MacroTypeCardProps {
