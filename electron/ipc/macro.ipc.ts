@@ -18,8 +18,13 @@ import {
   VolumeSettings,
   HotkeySettings,
   ProfileSwitchSettings,
+  ForceQuitSettings,
+  AeCommandSettings,
   StoreSchema,
 } from '../../src/types/macro.types';
+import { AE_SHORTCUTS } from '../../src/components/MacroSettings/ae/aeShortcuts';
+import { AE_PRESETS } from '../../src/components/MacroSettings/ae/aePresets';
+import { executeAeScript } from './ae.ipc';
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -351,6 +356,131 @@ ${[...vkCodes].reverse().map(vk => `[KS2]::keybd_event(${vk}, 0, 2, [UIntPtr]::Z
   ], { timeout: 5000 });
 }
 
+// ─── Force Quit — kill the foreground app's process tree ─────────────────────
+// Finds the process owning the active window, then walks UP the parent chain to
+// the app's real root process before killing it. This matters because many apps
+// render their window from a CHILD process: Steam's window belongs to
+// steamwebhelper.exe (child of steam.exe), Chrome/Discord/VS Code/Electron are the
+// same. Killing only the focused child lets the parent respawn it — the exact
+// "steamwebhelper comes back" symptom. We stop climbing at a boundary process (the
+// shell/launcher that started the app) so we kill the app but not Explorer or the
+// terminal. Then taskkill /F /T on the resolved root (whole tree, like End Task).
+
+// Never kill these: the desktop shell, core Windows UI, and our own process.
+// Also used as the walk-up STOP boundary — if a parent is one of these, the child
+// we came from is the app root.
+const PROTECTED_PROCESS_NAMES = new Set([
+  'explorer', 'dwm', 'csrss', 'winlogon', 'services', 'lsass', 'smss',
+  'wininit', 'system', 'idle', 'sihost', 'ctfmon', 'searchhost', 'runtimebroker',
+  'shellexperiencehost', 'startmenuexperiencehost', 'textinputhost',
+  'applicationframehost', 'svchost', 'fontdrvhost', 'dllhost', 'taskhostw',
+]);
+
+// Boundary processes: a shell/launcher/terminal that STARTS apps but is not part
+// of the app itself. When the walk-up reaches one of these as a PARENT, we stop and
+// keep the child (the app root). We must not kill these — doing so would take down
+// the user's terminal or shell along with the app.
+const BOUNDARY_PARENT_NAMES = new Set([
+  'explorer', 'cmd', 'powershell', 'pwsh', 'windowsterminal', 'wt',
+  'conhost', 'bash', 'wsl', 'services', 'svchost', 'userinit', 'winlogon',
+]);
+
+// Resolves the foreground window to the app's ROOT process by walking the parent
+// chain. Returns { pid, name } to kill, or null. All done in one PowerShell pass.
+// PID reuse guard: a parent only counts if it was created no later than its child
+// (Windows recycles PIDs; a "parent" created AFTER the child is a stale reuse).
+async function getForegroundRootProcess(): Promise<{ pid: number; name: string } | null> {
+  const protectedList = [...PROTECTED_PROCESS_NAMES].map((n) => `'${n}'`).join(',');
+  const boundaryList = [...BOUNDARY_PARENT_NAMES].map((n) => `'${n}'`).join(',');
+  const script = `
+$ErrorActionPreference = 'SilentlyContinue'
+$sig = @'
+using System;
+using System.Runtime.InteropServices;
+public class FG {
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+}
+'@
+Add-Type -TypeDefinition $sig
+$h = [FG]::GetForegroundWindow()
+if ($h -eq [IntPtr]::Zero) { return }
+$fgpid = 0
+[void][FG]::GetWindowThreadProcessId($h, [ref]$fgpid)
+if ($fgpid -eq 0) { return }
+
+$protected = @(${protectedList})
+$boundary  = @(${boundaryList})
+
+# Index all processes once: pid -> {name, ppid, created}
+$all = @{}
+foreach ($p in Get-CimInstance Win32_Process) {
+  $all[[int]$p.ProcessId] = [PSCustomObject]@{
+    Name    = ($p.Name -replace '\\.exe$','').ToLower()
+    PPid    = [int]$p.ParentProcessId
+    Created = $p.CreationDate
+  }
+}
+
+$curPid = [int]$fgpid
+$cur = $all[$curPid]
+if (-not $cur) { return }
+
+# Walk UP while the parent is a real, older process that is NOT a boundary/shell.
+# Stop (keep current) once the parent is Explorer, a terminal, a protected process,
+# or missing — that parent launched the app; current is the app root.
+$guard = 0
+while ($guard -lt 40) {
+  $guard++
+  $parent = $all[$cur.PPid]
+  if (-not $parent) { break }                              # no parent -> root
+  if ($boundary  -contains $parent.Name) { break }         # shell/launcher -> stop
+  if ($protected -contains $parent.Name) { break }         # system proc -> stop
+  # PID-reuse guard: parent must not be newer than the child.
+  if ($parent.Created -and $cur.Created -and $parent.Created -gt $cur.Created) { break }
+  $curPid = $cur.PPid
+  $cur = $parent
+}
+Write-Output ("{0}|{1}" -f $curPid, $cur.Name)
+`;
+  try {
+    ensureTmpDir();
+    const scriptPath = path.join(tmpDir, 'get-foreground.ps1');
+    fs.writeFileSync(scriptPath, script, 'utf8');
+    const { stdout } = await execFileAsync('powershell', [
+      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath,
+    ], { timeout: 6000 });
+    const out = String(stdout).trim();
+    if (!out) return null;
+    const [pidStr, ...nameParts] = out.split('|');
+    const pid = parseInt(pidStr, 10);
+    const name = nameParts.join('|').trim();
+    if (!Number.isFinite(pid) || pid <= 0) return null;
+    return { pid, name };
+  } catch (err: any) {
+    console.error('[macro.ipc] getForegroundRootProcess failed:', err.message?.slice(0, 100));
+    return null;
+  }
+}
+
+async function executeForceQuit(_settings: ForceQuitSettings): Promise<{ name: string } | null> {
+  const target = await getForegroundRootProcess();
+  if (!target) throw new Error('No foreground window found');
+
+  const bare = target.name.toLowerCase().replace(/\.exe$/, '');
+  if (PROTECTED_PROCESS_NAMES.has(bare)) {
+    throw new Error(`Refusing to kill system process "${target.name}"`);
+  }
+  if (target.pid === process.pid) {
+    throw new Error('Refusing to kill MacroDeck itself');
+  }
+
+  // /F = force, /T = kill the whole process tree (children too). Kill by PID so we
+  // hit exactly the resolved app-root process, not every instance of that exe.
+  await execFileAsync('taskkill', ['/F', '/T', '/PID', String(target.pid)], { timeout: 5000 });
+  return { name: target.name.replace(/\.exe$/i, '') };
+}
+
 // ─── Main Executor ────────────────────────────────────────────────────────────
 
 export async function executeMacro(macro: MacroConfig): Promise<boolean> {
@@ -459,6 +589,64 @@ export async function executeMacro(macro: MacroConfig): Promise<boolean> {
         await executeProfileSwitch(macro.settings as ProfileSwitchSettings);
         // Profile switch notification is sent after renderer updates
         break;
+
+      case 'FORCE_QUIT': {
+        const s = macro.settings as ForceQuitSettings;
+        const id = genId();
+        sendNotification({ id, type: 'loading', title: 'Force quitting…', icon: icon ?? '💀', duration: 0 });
+        try {
+          const result = await executeForceQuit(s);
+          updateNotification(id, {
+            type: 'success',
+            title: result ? `Killed ${result.name}` : 'App killed',
+            icon: icon ?? '💀',
+            duration: 2500,
+          });
+        } catch (err: any) {
+          updateNotification(id, { type: 'error', title: 'Force quit failed', message: err.message?.slice(0, 60), duration: 3000 });
+          return false;
+        }
+        break;
+      }
+
+      case 'AE_COMMAND': {
+        const s = macro.settings as AeCommandSettings;
+        const id = genId();
+        sendNotification({ id, type: 'loading', title: 'Running AE action…', icon: icon ?? '🎬', duration: 0 });
+
+        try {
+          if (s.mode === 'shortcut' || !s.mode) {
+            // ── Shortcut mode: look up key combo and send it ──────────────
+            const shortcut = AE_SHORTCUTS.find(sh => sh.id === s.shortcutId);
+            if (!shortcut) throw new Error(`Unknown AE shortcut: ${s.shortcutId}`);
+
+            for (let i = 0; i < shortcut.actions.length; i++) {
+              await executeHotkey({ displayName: '', keys: shortcut.actions[i] });
+              if (i < shortcut.actions.length - 1) {
+                await new Promise(r => setTimeout(r, 100));
+              }
+            }
+            updateNotification(id, { type: 'success', title: name || shortcut.label, message: shortcut.displayKeys, duration: 1800 });
+          } else {
+            // ── Script mode: resolve JSX and run via afterfx.exe -r ───────
+            let jsx: string;
+            if (s.scriptType === 'preset') {
+              const preset = AE_PRESETS.find(p => p.id === s.presetId);
+              if (!preset) throw new Error(`Unknown AE preset: ${s.presetId}`);
+              jsx = preset.jsx;
+            } else {
+              if (!s.script?.trim()) throw new Error('No JSX script configured.');
+              jsx = s.script;
+            }
+            await executeAeScript(jsx);
+            updateNotification(id, { type: 'success', title: name || 'AE script ran', duration: 2000 });
+          }
+        } catch (err: any) {
+          updateNotification(id, { type: 'error', title: 'AE action failed', message: err.message?.slice(0, 80), duration: 3500 });
+          return false;
+        }
+        break;
+      }
 
       default:
         throw new Error(`Unknown macro type: ${(macro as any).type}`);
