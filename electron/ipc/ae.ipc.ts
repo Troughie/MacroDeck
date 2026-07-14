@@ -4,7 +4,6 @@ import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
-import { execSync } from 'child_process';
 
 const execFileAsync = promisify(execFile);
 const tmpDir = path.join(os.tmpdir(), 'macrodeck');
@@ -32,14 +31,15 @@ function findAeExeByFilesystem(): string | null {
   return null;
 }
 
-function findAeExeByRegistry(): string | null {
-  // Query HKLM\SOFTWARE\Adobe\After Effects for installed versions
+async function findAeExeByRegistry(): Promise<string | null> {
   try {
-    const out = execSync(
-      'reg query "HKLM\\SOFTWARE\\Adobe\\After Effects" /s /v InstallPath',
-      { encoding: 'utf8', timeout: 3000, windowsHide: true }
+    const { stdout: stdoutRaw } = await execFileAsync(
+      'reg',
+      ['query', 'HKLM\\SOFTWARE\\Adobe\\After Effects', '/s', '/v', 'InstallPath'],
+      { timeout: 3000, windowsHide: true } as any
     );
-    const lines = out.split('\n');
+    const stdout = String(stdoutRaw);
+    const lines = stdout.split('\n');
     for (const line of lines) {
       const match = line.match(/InstallPath\s+REG_SZ\s+(.+)/i);
       if (match) {
@@ -56,11 +56,11 @@ function findAeExeByRegistry(): string | null {
 
 let cachedAePath: string | null | undefined = undefined; // undefined = not yet searched
 
-export function detectAfterEffects(): { found: boolean; path: string | null } {
+export async function detectAfterEffects(): Promise<{ found: boolean; path: string | null }> {
   if (cachedAePath !== undefined) {
     return { found: cachedAePath !== null, path: cachedAePath };
   }
-  const byRegistry = findAeExeByRegistry();
+  const byRegistry = await findAeExeByRegistry();
   const result = byRegistry ?? findAeExeByFilesystem();
   cachedAePath = result;
   return { found: result !== null, path: result };
@@ -69,33 +69,28 @@ export function detectAfterEffects(): { found: boolean; path: string | null } {
 // ─── JSX Script Execution ─────────────────────────────────────────────────────
 
 export async function executeAeScript(jsx: string): Promise<void> {
-  const { found, path: aePath } = detectAfterEffects();
+  const { found, path: aePath } = await detectAfterEffects();
   if (!found || !aePath) {
     throw new Error('After Effects not found. Install AE or set the path manually.');
   }
 
   // Check if AE process is running (avoids spawning a second instance)
   try {
-    const result = execSync('tasklist /FI "IMAGENAME eq AfterFX.exe" /NH', {
-      encoding: 'utf8', timeout: 3000, windowsHide: true,
-    });
-    if (!result.toLowerCase().includes('afterfx.exe')) {
+    const { stdout: tasklistOut } = await execFileAsync('tasklist', ['/FI', 'IMAGENAME eq AfterFX.exe', '/NH'], { timeout: 3000, windowsHide: true } as any);
+    if (!String(tasklistOut).toLowerCase().includes('afterfx.exe')) {
       throw new Error('After Effects is not running. Open AE first.');
     }
   } catch (err: any) {
-    if (err.message.includes('not running')) throw err;
-    // tasklist itself failed — proceed anyway and let afterfx handle it
+    if (err?.message?.includes('not running')) throw err;
+    // tasklist failed (non-Windows or command error) — proceed
   }
 
   ensureTmpDir();
-  const scriptPath = path.join(tmpDir, `ae_script_${Date.now()}.jsx`);
+  // Fixed filename — AE reads it after the CLI exits, so don't delete it.
+  // Overwriting is safe since macros run serially.
+  const scriptPath = path.join(tmpDir, 'ae_current_script.jsx');
   fs.writeFileSync(scriptPath, jsx, 'utf8');
-
-  try {
-    await execFileAsync(aePath, ['-r', scriptPath], { timeout: 15000 });
-  } finally {
-    try { fs.unlinkSync(scriptPath); } catch { /* ignore cleanup errors */ }
-  }
+  await execFileAsync(aePath, ['-r', scriptPath], { timeout: 15000 });
 }
 
 // ─── IPC Registration ─────────────────────────────────────────────────────────

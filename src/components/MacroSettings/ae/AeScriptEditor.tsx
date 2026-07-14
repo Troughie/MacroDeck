@@ -37,13 +37,18 @@ export function AeScriptEditor({
     if (!jsx?.trim()) return;
     setTestStatus('running');
     setTestError('');
-    const result = await electronAPI?.ae.execute(jsx);
-    if (result?.ok) {
-      setTestStatus('ok');
-      setTimeout(() => setTestStatus('idle'), 2500);
-    } else {
+    try {
+      const result = await electronAPI?.ae.execute(jsx);
+      if (result?.ok) {
+        setTestStatus('ok');
+        setTimeout(() => setTestStatus('idle'), 2500);
+      } else {
+        setTestStatus('error');
+        setTestError(result?.error ?? 'Unknown error');
+      }
+    } catch (e: any) {
       setTestStatus('error');
-      setTestError(result?.error ?? 'Unknown error');
+      setTestError(e?.message ?? 'IPC error');
     }
   };
 

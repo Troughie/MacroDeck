@@ -12,6 +12,8 @@ const TYPE_COLORS: Record<MacroType, string> = {
   VOLUME_ADJUST: '#22c55e',
   HOTKEY: '#06b6d4',
   PROFILE_SWITCH: '#a855f7',
+  FORCE_QUIT: '#f97316',
+  AE_COMMAND: '#00bcd4',
 };
 
 const TYPE_LABELS: Record<MacroType, string> = {
@@ -22,6 +24,8 @@ const TYPE_LABELS: Record<MacroType, string> = {
   VOLUME_ADJUST: 'Vol',
   HOTKEY: 'Key',
   PROFILE_SWITCH: 'Profile',
+  FORCE_QUIT: 'Kill',
+  AE_COMMAND: 'AE',
 };
 
 export function AssignedMacroList() {
