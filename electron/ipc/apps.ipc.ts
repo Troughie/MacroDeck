@@ -42,15 +42,18 @@ const PS_SCRIPT = `
 $ErrorActionPreference = 'SilentlyContinue'
 
 # ── Chỉ block những thứ CHẮC CHẮN không phải app người dùng ─────────────────
-# Runtime/framework/driver/SDK/system tool — KHÔNG block browser, game, media
+# Runtime/framework/driver/SDK/dev-tool/system tool — KHÔNG block browser, game, media
 $badAppPattern = '(?i)(
   ^microsoft visual c\+\+|
   ^microsoft \.net|
   \.net framework \d|
+  \.net runtime|
+  \.net sdk|
   redistributable|
   (?<!\w)runtime(?!\s+for)|
   directx for managed|
   windows sdk|
+  windows software development|
   windows driver kit|
   windows assessment|
   windows kits|
@@ -63,8 +66,10 @@ $badAppPattern = '(?i)(
   ^realtek|
   ^qualcomm|
   ^synaptics|
+  ^nvidia|
   nvidia frameview|
   amd chipset|
+  amd software|
   microsoft webview2|
   microsoft edge webview|
   windows app runtime|
@@ -73,22 +78,63 @@ $badAppPattern = '(?i)(
   ^apple application support|
   ^apple mobile device support|
   ^apple software update|
-  easyanticheat_eos$|
+  easyanticheat|
   ^steam overlay|
   ^discord overlay|
   ^iis \d|
   iis express|
+  internet information services|
   ^wampserver|
   ^xampp|
   ^cmake\b|
   ^llvm\b|
+  ^clang\b|
+  ^mingw|
+  ^msys2|
+  ^node\.?js|
+  ^python( |$|\d)|
+  ^pip\b|
+  ^git( |$)|
+  ^git for windows|
+  ^github cli|
+  ^go( |$)programming|
+  ^golang|
+  ^rust\b|
+  ^ruby\b|
+  ^perl\b|
+  ^php\b|
+  ^java( |$)|
+  ^java\(tm\)|
+  ^openjdk|
+  jdk\b|
+  jre\b|
+  ^dotnet|
+  ^docker\b|
+  ^kubernetes|
+  ^terraform|
+  ^vagrant|
+  ^oracle vm|
+  ^windows terminal|
   microsoft office sdx|
   office \d{4} click-to-run|
   ^windows defender$|
   windows defender advanced|
   ^microsoft defender|
-  ^windows subsystem for linux
+  ^windows subsystem for linux|
+  ^7-?zip|
+  ^winrar|
+  ^winzip|
+  ^peazip|
+  ^bandizip
 )' -replace '\s+', ''
+
+# ── Nhà phát hành là Microsoft => app dựng sẵn của Windows (Mail, Photos,
+#    Defender, IIS, OneDrive, Edge, Office runtime...). Nguoi dung tu search khi
+#    can. GIU LAI mot vai app Microsoft ma nguoi ta THUC SU tai ve de dung.
+$microsoftPublisher = '(?i)(microsoft (corp|corporation)|microsoft$)'
+# Cac app Microsoft van cho phep hien (nguoi dung chu dong cai):
+$msAllowName = '(?i)(visual studio code|visual studio\b|vscode|sql server management|powertoys|teams|to do|onenote|edge$|skype)'
+
 
 # ── Exe bị cấm dứt khoát (uninstaller, background service, CLI tool thuần) ───
 # Lưu ý: KHÔNG block "launcher" vì Steam, Riot, Epic đều là launcher hợp lệ
@@ -177,6 +223,11 @@ foreach ($regPath in $regPaths) {
     if (-not $item.UninstallString)          { continue }
     if ($item.DisplayName -match $badAppPattern) { continue }
 
+    # Bo app do Microsoft phat hanh (app Windows dung san / runtime / Office...),
+    # TRU cac app Microsoft nguoi dung chu dong tai ve (VS Code, PowerToys...).
+    $pub = [string]$item.Publisher
+    if ($pub -match $microsoftPublisher -and $item.DisplayName -notmatch $msAllowName) { continue }
+
     $exePath = $null
 
     # Ưu tiên 1: InstallLocation
@@ -219,6 +270,12 @@ try {
       $displayName = $pkg.Name -replace '^.*?\.', '' -replace '_.*$', ''
     }
     if ($displayName -match $badAppPattern) { continue }
+
+    # Bo app Store do Microsoft phat hanh (Mail, Photos, Xbox, Maps, Clipchamp,
+    # Solitaire...) — app Windows dung san. Nguoi dung tu search khi can. Giu lai
+    # app Microsoft chu dong tai (Teams, To Do...) va MOI app khong phai Microsoft.
+    $appxPub = try { [string]$pkg.Publisher } catch { '' }
+    if ($appxPub -match '(?i)Microsoft (Corporation|Windows)' -and $displayName -notmatch $msAllowName) { continue }
 
     # Tìm exe entry point từ manifest
     $exePath = $null
@@ -285,9 +342,14 @@ const BAD_EXE_RE =
 const BAD_DIR_RE =
   /\\Windows\\System32|\\Windows\\SysWOW64|\\Windows\\WinSxS|\\Windows\\Installer/i;
 
-/** Tên app chắc chắn là system component (giữ tối thiểu để tránh false positive) */
+/** Tên app chắc chắn là system component / runtime / môi trường / archiver nền */
 const BAD_APP_RE =
-  /^microsoft visual c\+\+|redistributable|^microsoft \.net|\.net framework \d|security update for|hotfix for|update for windows|^windows defender$|windows defender advanced|windows subsystem for linux/i;
+  /^microsoft visual c\+\+|redistributable|^microsoft \.net|\.net framework \d|\.net runtime|\.net sdk|security update for|hotfix for|update for windows|^windows defender$|windows defender advanced|^microsoft defender|windows subsystem for linux|windows sdk|windows driver kit|iis express|internet information services|^node\.?js|^python( |$|\d)|^git( |$)|^git for windows|^java( |$)|^java\(tm\)|^openjdk|jdk\b|jre\b|^docker\b|^golang|^rust\b|^llvm\b|^clang\b|^mingw|^msys2|^cmake\b|^7-?zip|^winrar|^winzip|^peazip|^bandizip|^nvidia|amd software/i;
+
+/** App do Microsoft phát hành = app Windows dựng sẵn, TRỪ vài app tự tải về. */
+const MS_PUBLISHER_RE = /microsoft (corp|corporation|windows)|^microsoft$/i;
+const MS_ALLOW_NAME_RE =
+  /visual studio code|visual studio\b|vscode|sql server management|powertoys|teams|to do|onenote|edge$|skype/i;
 
 function isValid(a: InstalledApp): boolean {
   if (!a.name || !a.exePath) return false;
@@ -303,6 +365,11 @@ function isValid(a: InstalledApp): boolean {
   if (BAD_EXE_RE.test(exeName)) return false;
   if (BAD_DIR_RE.test(a.exePath)) return false;
   if (BAD_APP_RE.test(a.name)) return false;
+
+  // Bỏ app Microsoft (Windows dựng sẵn) trừ các app người dùng chủ động tải về.
+  if (a.publisher && MS_PUBLISHER_RE.test(a.publisher) && !MS_ALLOW_NAME_RE.test(a.name)) {
+    return false;
+  }
 
   return true;
 }
