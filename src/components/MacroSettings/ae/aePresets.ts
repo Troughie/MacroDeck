@@ -15,6 +15,7 @@ export const AE_PRESET_CATEGORIES: AePresetCategory[] = [
   { id: 'layer', label: 'Layer Utilities' },
   { id: 'expr',  label: 'Expressions' },
   { id: 'comp',  label: 'Composition' },
+  { id: 'anim',  label: 'Animation' },
 ];
 
 export const AE_PRESETS: AePreset[] = [
@@ -315,6 +316,159 @@ if (comp && comp instanceof CompItem) {
     sel[i].motionBlur = !sel[i].motionBlur;
   }
   app.endUndoGroup();
+}`,
+  },
+
+  // ── Animation ─────────────────────────────────────────────────────────────
+  {
+    id: 'anim.countingNumber',
+    label: 'Counting Number',
+    category: 'anim',
+    description: 'Creates a text layer that counts up or down. Value, decimals and separators are all editable in AE Effect Controls.',
+    jsx: `// ─── Starting values (everything below is editable inside After Effects) ───
+// After running, tweak on the "Counter" text layer:
+//   • Effect Controls → "Value"      : keyframe 1 = start, keyframe 2 = end.
+//                                       Drag keyframes in the timeline to change
+//                                       start/end/duration. Set start > end to
+//                                       count DOWN.
+//   • Effect Controls → "Decimals"   : how many digits after the decimal point.
+//   • Effect Controls → "Thousands"  : checkbox for 1,000 separators.
+//   • Character panel                : font size / font / colour.
+var START     = 0;    // initial start value (keyframe 1)
+var END       = 100;  // initial end value   (keyframe 2)
+var DURATION  = 3;    // seconds between the two keyframes
+var START_AT  = 0;    // seconds into the comp where the count begins
+var DECIMALS  = 0;    // initial decimals
+var THOUSANDS = 0;    // initial separator checkbox (0 = off, 1 = on)
+var PREFIX    = "";   // text before the number, e.g. "$"  (edit here)
+var SUFFIX    = "";   // text after the number,  e.g. "%"  (edit here)
+var FONT_SIZE = 120;  // initial text size
+// ──────────────────────────────────────────────────────────────────────────
+
+var comp = app.project.activeItem;
+if (!comp || !(comp instanceof CompItem)) {
+  alert("Open a composition first.");
+} else {
+  app.beginUndoGroup("Counting Number");
+
+  var textLayer = comp.layers.addText("0");
+  textLayer.name = "Counter";
+  textLayer.transform.position.setValue([comp.width / 2, comp.height / 2]);
+
+  var textProp = textLayer.property("Source Text");
+  var td = textProp.value;
+  td.fontSize = FONT_SIZE;
+  td.justification = ParagraphJustification.CENTER_JUSTIFY;
+  textProp.setValue(td);
+
+  var effects = textLayer.property("Effects");
+
+  // "Value" slider drives the number; two keyframes animate START -> END.
+  var valueCtrl = effects.addProperty("ADBE Slider Control");
+  valueCtrl.name = "Value";
+  var slider = valueCtrl.property("Slider");
+  slider.setValueAtTime(START_AT, START);
+  slider.setValueAtTime(START_AT + DURATION, END);
+  var ease = new KeyframeEase(0, 33);
+  slider.setTemporalEaseAtKey(1, [ease], [ease]);
+  slider.setTemporalEaseAtKey(2, [ease], [ease]);
+
+  // "Decimals" and "Thousands" are live controls the expression reads.
+  var decCtrl = effects.addProperty("ADBE Slider Control");
+  decCtrl.name = "Decimals";
+  decCtrl.property("Slider").setValue(DECIMALS);
+
+  var sepCtrl = effects.addProperty("ADBE Checkbox Control");
+  sepCtrl.name = "Thousands";
+  sepCtrl.property("Checkbox").setValue(THOUSANDS);
+
+  // Expression: reads the three controls above, so nothing is baked in.
+  // No regex — a simple loop inserts the thousands separators.
+  var expr = [
+    "var v = effect(\\"Value\\")(\\"Slider\\").value;",
+    "var dec = Math.round(effect(\\"Decimals\\")(\\"Slider\\").value);",
+    "if (dec < 0) dec = 0;",
+    "var useSep = effect(\\"Thousands\\")(\\"Checkbox\\").value == 1;",
+    "var neg = v < 0;",
+    "var s = Math.abs(v).toFixed(dec);",
+    "if (useSep) {",
+    "  var parts = s.split(\\".\\");",
+    "  var intp = parts[0];",
+    "  var out = \\"\\";",
+    "  var c = 0;",
+    "  for (var i = intp.length - 1; i >= 0; i--) {",
+    "    out = intp.charAt(i) + out;",
+    "    c++;",
+    "    if (c % 3 == 0 && i > 0) out = \\",\\" + out;",
+    "  }",
+    "  parts[0] = out;",
+    "  s = parts.join(\\".\\");",
+    "}",
+    "(neg ? \\"-\\" : \\"\\") + \\"" + PREFIX + "\\" + s + \\"" + SUFFIX + "\\";"
+  ].join("\\n");
+  textProp.expression = expr;
+
+  app.endUndoGroup();
+}`,
+  },
+  {
+    id: 'anim.trimPaths',
+    label: 'Add Trim Paths (Write-On)',
+    category: 'anim',
+    description: 'Adds a Trim Paths animator to each selected shape layer and keyframes a 0→100% write-on. Adjust the two "End" keyframes in the timeline to change speed.',
+    jsx: `// ─── Starting values (editable here, then tweak keyframes inside AE) ────────
+// After running, on each shape layer:
+//   • Contents → Trim Paths 1 → End : keyframe 1 = 0%, keyframe 2 = 100%.
+//                                      Drag the second keyframe to change how
+//                                      long the write-on takes.
+//   • Set the layer's Trim Paths → Start instead if you want it to erase.
+var START_AT = 0;   // seconds into the comp where the draw begins
+var DURATION = 2;   // seconds for the 0% → 100% write-on
+// ──────────────────────────────────────────────────────────────────────────
+
+var comp = app.project.activeItem;
+if (!comp || !(comp instanceof CompItem)) {
+  alert("Open a composition first.");
+} else if (comp.selectedLayers.length === 0) {
+  alert("Select one or more shape layers first.");
+} else {
+  app.beginUndoGroup("Add Trim Paths");
+
+  var applied = 0;
+  var skipped = 0;
+  var sel = comp.selectedLayers;
+
+  for (var i = 0; i < sel.length; i++) {
+    var layer = sel[i];
+    // Only shape layers have a "Contents" ("ADBE Root Vectors Group") property.
+    var contents = layer.property("ADBE Root Vectors Group");
+    if (!contents) { skipped++; continue; }
+
+    // "ADBE Vector Filter - Trim" is the Trim Paths shape effect. Adding it to
+    // Contents trims every path in the layer at once (matches Add ▸ Trim Paths).
+    var trim = contents.addProperty("ADBE Vector Filter - Trim");
+    var endProp = trim.property("ADBE Vector Trim End"); // the "End" percentage
+
+    var startTime = comp.time + START_AT;
+    endProp.setValueAtTime(startTime, 0);
+    endProp.setValueAtTime(startTime + DURATION, 100);
+
+    // Smooth ease on both keyframes so the draw doesn't start/stop abruptly.
+    var ease = new KeyframeEase(0, 33);
+    endProp.setTemporalEaseAtKey(1, [ease], [ease]);
+    endProp.setTemporalEaseAtKey(2, [ease], [ease]);
+
+    applied++;
+  }
+
+  app.endUndoGroup();
+
+  if (applied === 0) {
+    alert("No shape layers selected — Trim Paths only applies to shape layers.");
+  } else if (skipped > 0) {
+    alert("Added Trim Paths to " + applied + " shape layer(s); skipped " +
+          skipped + " non-shape layer(s).");
+  }
 }`,
   },
 ];
