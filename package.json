@@ -105,6 +105,13 @@
           "*.cs",
           "*.ps1"
         ]
+      },
+      {
+        "from": "ae-panel/",
+        "to": "ae-panel/",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "asar": true,
