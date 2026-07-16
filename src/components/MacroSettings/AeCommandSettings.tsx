@@ -33,17 +33,30 @@ function AePanelStatus() {
     try { await electronAPI?.ae.install(); } finally { setInstalling(false); }
   };
 
+  const reinstallButton = (
+    <button
+      onClick={handleInstall}
+      disabled={installing}
+      className="btn-secondary text-xs py-1 px-2 flex items-center gap-1 disabled:opacity-50 flex-shrink-0"
+      title="Copy the latest panel files into After Effects (needed after MacroDeck updates the panel)"
+    >
+      {installing ? <Loader2 size={12} className="animate-spin" /> : null}
+      {installing ? 'Updating...' : 'Reinstall'}
+    </button>
+  );
+
   if (!status) return null;
 
   if (status.alive) {
     return (
       <div className="flex items-start gap-2 p-2 rounded-lg bg-green-500/10 border border-green-500/20">
         <CheckCircle2 size={12} className="text-green-400 flex-shrink-0 mt-0.5" />
-        <p className="text-green-300 text-xs">
+        <p className="text-green-300 text-xs flex-1">
           Connected{status.aeVersion ? ` — AE ${status.aeVersion}` : ''}
           <br />
           <span className="text-text-muted">Scripts run instantly without window flicker.</span>
         </p>
+        {reinstallButton}
       </div>
     );
   }
@@ -52,11 +65,12 @@ function AePanelStatus() {
     return (
       <div className="flex items-start gap-2 p-2 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
         <CircleDashed size={12} className="text-yellow-400 flex-shrink-0 mt-0.5" />
-        <p className="text-yellow-300 text-xs">
+        <p className="text-yellow-300 text-xs flex-1">
           Installed but not open in AE
           <br />
           <span className="text-text-muted">Open Window &rarr; Extensions &rarr; MacroDeck in After Effects.</span>
         </p>
+        {reinstallButton}
       </div>
     );
   }
