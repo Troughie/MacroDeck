@@ -24,6 +24,7 @@ const store = new Store<StoreSchema>({
       startMinimized: false,
       theme: 'dark',
     },
+    aeScripts: [],
   },
 });
 
@@ -178,6 +179,15 @@ function registerStoreIpc(): void {
 
   ipcMain.handle('store:loadDevice', () => {
     return store.get('selectedDeviceId', '');
+  });
+
+  ipcMain.handle('store:saveAeScripts', (_event, scripts) => {
+    store.set('aeScripts', scripts);
+    return true;
+  });
+
+  ipcMain.handle('store:loadAeScripts', () => {
+    return store.get('aeScripts', []);
   });
 }
 

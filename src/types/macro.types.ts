@@ -176,6 +176,16 @@ export interface StoreSchema {
   profiles: Profile[];
   activeProfileId: string;
   settings: AppSettings;
+  aeScripts: AeSavedScript[]; // reusable custom JSX library, shared across keys
+}
+
+// A user-saved custom JSX script, reusable across any AE macro key.
+export interface AeSavedScript {
+  id: string;
+  name: string;
+  jsx: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
 // ─── IPC Channel Names ────────────────────────────────────────────────────────
