@@ -327,7 +327,7 @@ export function AeScriptEditor({
                       {e.name}
                     </button>
                     <span className="text-text-muted flex-shrink-0 text-[10px] uppercase tracking-wide">
-                      {e.target === 'selected' ? 'selected' : e.target}
+                      {e.target}
                     </span>
                     <button
                       onClick={() => removeExpression(e.id)}
