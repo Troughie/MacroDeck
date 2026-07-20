@@ -8,7 +8,8 @@ import { registerAudioIpc } from './ipc/audio.ipc';
 import { registerMacroIpc } from './ipc/macro.ipc';
 import { registerSystemIpc, setWindowsStartup } from './ipc/system.ipc';
 import { registerAeIpc } from './ipc/ae.ipc';
-import { writeLibrary } from './ipc/ae-bridge';
+import { writeLibrary, writeExpressions } from './ipc/ae-bridge';
+import { compileExpression } from '../src/components/MacroSettings/ae/compileExpression';
 import { ensureAppVolumeExe } from './native/appvolume';
 import { createNotificationWindow, registerNotificationIpc } from './notification-window';
 import { installFileLogger } from './debug-log';
@@ -164,6 +165,22 @@ function syncAeLibrary(): void {
   }
 }
 
+// Compile each saved expression to JSX and refresh the panel's expressions.json.
+// Wrapped so a write/compile failure is logged but never crashes the caller.
+function syncAeExpressions(): void {
+  try {
+    const exprs = store.get('aeExpressions', []);
+    const compiled = exprs.map(e => ({
+      id: e.id,
+      name: e.name,
+      jsx: compileExpression(e.expression, e.target),
+    }));
+    writeExpressions(compiled);
+  } catch (e) {
+    console.error('[main] writeExpressions failed:', e);
+  }
+}
+
 function registerStoreIpc(): void {
   ipcMain.handle('store:saveMacros', (_event, macros) => {
     store.set('macros', macros);
@@ -201,6 +218,16 @@ function registerStoreIpc(): void {
 
   ipcMain.handle('store:loadAeScripts', () => {
     return store.get('aeScripts', []);
+  });
+
+  ipcMain.handle('store:saveAeExpressions', (_event, expressions) => {
+    store.set('aeExpressions', expressions);
+    syncAeExpressions();
+    return true;
+  });
+
+  ipcMain.handle('store:loadAeExpressions', () => {
+    return store.get('aeExpressions', []);
   });
 }
 
@@ -253,6 +280,7 @@ app.whenReady().then(() => {
   // Seed the AE panel's library.json so it has data even if the user changes
   // nothing this session (the panel reads the last-written file).
   syncAeLibrary();
+  syncAeExpressions();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
