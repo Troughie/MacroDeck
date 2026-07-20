@@ -10,6 +10,7 @@ export function bridgeDir(): string {
 export function requestPath(): string { return path.join(bridgeDir(), 'request.json'); }
 export function responsePath(): string { return path.join(bridgeDir(), 'response.json'); }
 export function heartbeatPath(): string { return path.join(bridgeDir(), 'heartbeat.json'); }
+export function libraryPath(): string { return path.join(bridgeDir(), 'library.json'); }
 
 function ensureBridgeDir(): void {
   const dir = bridgeDir();
@@ -37,6 +38,17 @@ export interface BridgeResponse {
 export function writeRequest(id: string, jsx: string, ts: number = Date.now()): void {
   ensureBridgeDir();
   fs.writeFileSync(requestPath(), JSON.stringify({ id, jsx, ts }), 'utf8');
+}
+
+// Writes the saved-script library for the AE panel to read. Slimmed to
+// { id, name, jsx } so the panel never depends on store-only fields
+// (createdAt/updatedAt). One-way: MacroDeck writes, the panel reads.
+export function writeLibrary(
+  scripts: Array<{ id: string; name: string; jsx: string }>,
+): void {
+  ensureBridgeDir();
+  const slim = scripts.map(s => ({ id: s.id, name: s.name, jsx: s.jsx }));
+  fs.writeFileSync(libraryPath(), JSON.stringify(slim), 'utf8');
 }
 
 export function readResponse(): BridgeResponse | null {

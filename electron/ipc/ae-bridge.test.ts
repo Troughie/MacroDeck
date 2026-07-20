@@ -10,6 +10,8 @@ import {
   genRequestId,
   writeRequest,
   readResponse,
+  libraryPath,
+  writeLibrary,
 } from './ae-bridge';
 
 describe('ae-bridge paths', () => {
@@ -165,5 +167,32 @@ describe('executeViaPanel', () => {
       timeoutMs: 5000,
     };
     await expect(executeViaPanel('x', opts)).rejects.toThrow(/not responding|timeout/i);
+  });
+});
+
+describe('libraryPath', () => {
+  it('places library.json under macrodeck/ae_bridge in tmp', () => {
+    const dir = path.join(os.tmpdir(), 'macrodeck', 'ae_bridge');
+    expect(libraryPath()).toBe(path.join(dir, 'library.json'));
+  });
+});
+
+describe('writeLibrary', () => {
+  const dir = path.join(os.tmpdir(), 'macrodeck', 'ae_bridge');
+  beforeEach(() => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} });
+  afterEach(() => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} });
+
+  it('writes id/name/jsx and strips store-only fields', () => {
+    writeLibrary([
+      { id: 'a1', name: 'Expr One', jsx: 'alert(1);', createdAt: 5, updatedAt: 9 } as any,
+    ]);
+    const raw = JSON.parse(fs.readFileSync(libraryPath(), 'utf8'));
+    expect(raw).toEqual([{ id: 'a1', name: 'Expr One', jsx: 'alert(1);' }]);
+  });
+
+  it('writes an empty array without throwing', () => {
+    expect(() => writeLibrary([])).not.toThrow();
+    const raw = JSON.parse(fs.readFileSync(libraryPath(), 'utf8'));
+    expect(raw).toEqual([]);
   });
 });
