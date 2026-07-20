@@ -22,9 +22,13 @@
   var requestPath = path.join(bridgeDir, 'request.json');
   var responsePath = path.join(bridgeDir, 'response.json');
   var heartbeatPath = path.join(bridgeDir, 'heartbeat.json');
+  var libraryPath = path.join(bridgeDir, 'library.json');
 
   var statusEl = document.getElementById('status');
   var lastEl = document.getElementById('last');
+  var scriptsEl = document.getElementById('scripts');
+  var emptyEl = document.getElementById('empty');
+  var runResultEl = document.getElementById('runResult');
 
   var lastHandledId = null;
 
@@ -106,6 +110,77 @@
     });
   }
 
+  // ─── Saved-script library: read library.json, render buttons, run on click ────
+  var lastLibraryRaw = null;
+
+  function setRunResult(text, ok) {
+    if (!runResultEl) return;
+    runResultEl.textContent = text;
+    runResultEl.style.color = ok ? '#6bcf63' : '#e06c6c';
+  }
+
+  function runScript(name, jsx) {
+    setRunResult('Running ' + name + '…', true);
+    cs.evalScript('MacroDeckRunner(' + JSON.stringify(jsx) + ')', function (result) {
+      var payload;
+      try {
+        payload = JSON.parse(result);
+      } catch (e) {
+        payload = { ok: false, error: 'Panel could not parse AE result: ' + result };
+      }
+      if (payload && payload.ok === true) {
+        setRunResult('✓ ' + name, true);
+      } else {
+        setRunResult('✗ ' + (payload ? (payload.error || 'Unknown error') : 'Unknown error'), false);
+      }
+    });
+  }
+
+  function renderLibrary(scripts) {
+    if (!scriptsEl) return;
+    scriptsEl.textContent = '';
+
+    if (!scripts || scripts.length === 0) {
+      if (emptyEl) emptyEl.textContent =
+        'No saved scripts yet — save one in MacroDeck to see it here.';
+      return;
+    }
+    if (emptyEl) emptyEl.textContent = '';
+
+    for (var i = 0; i < scripts.length; i++) {
+      (function (s) {
+        var btn = document.createElement('button');
+        btn.textContent = s.name || '(unnamed)';
+        btn.addEventListener('click', function () {
+          runScript(s.name || '(unnamed)', s.jsx != null ? s.jsx : '');
+        });
+        scriptsEl.appendChild(btn);
+      })(scripts[i]);
+    }
+  }
+
+  // Re-render only when the raw file text changed, so hover/focus isn't lost
+  // and the list doesn't flicker every tick.
+  function refreshLibrary() {
+    var raw;
+    try {
+      raw = fs.readFileSync(libraryPath, 'utf8');
+    } catch (e) {
+      if (lastLibraryRaw !== '') { lastLibraryRaw = ''; renderLibrary([]); }
+      return; // no library file yet — show empty state
+    }
+    if (raw === lastLibraryRaw) return;
+    lastLibraryRaw = raw;
+
+    var scripts;
+    try {
+      scripts = JSON.parse(raw);
+    } catch (e) {
+      return; // corrupt/partial write — keep previous render, retry next tick
+    }
+    renderLibrary(Array.isArray(scripts) ? scripts : []);
+  }
+
   // ─── Heartbeat: refresh every second so MacroDeck sees the panel as alive ─────
   function heartbeat() {
     try {
@@ -120,6 +195,8 @@
   ensureDir();
   setStatus('Connected' + (aeVersion ? ' · AE ' + aeVersion : ''));
   heartbeat();
+  refreshLibrary();
   setInterval(poll, 150);
   setInterval(heartbeat, 1000);
+  setInterval(refreshLibrary, 1000);
 })();

@@ -11,12 +11,28 @@
     h1 { font-size: 13px; margin: 0 0 8px; color: #fff; }
     #status { color: #6bcf63; }
     #last { color: #888; margin-top: 4px; font-size: 11px; }
+    #scripts {
+      margin-top: 10px; max-height: 320px; overflow-y: auto;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    #scripts button {
+      display: block; width: 100%; text-align: left; cursor: pointer;
+      background: #2a2a2a; color: #ddd; border: 1px solid #3a3a3a;
+      border-radius: 4px; padding: 6px 8px; font-size: 12px;
+    }
+    #scripts button:hover { background: #333; border-color: #4a4a4a; }
+    #scripts button:active { background: #3a3a3a; }
+    #empty { color: #777; font-size: 11px; margin-top: 10px; }
+    #runResult { margin-top: 8px; font-size: 11px; min-height: 14px; }
   </style>
 </head>
 <body>
   <h1>MacroDeck</h1>
   <div id="status">Starting…</div>
   <div id="last"></div>
+  <div id="scripts"></div>
+  <div id="empty"></div>
+  <div id="runResult"></div>
   <script src="./js/CSInterface.js"></script>
   <script src="./js/main.js"></script>
 </body>
