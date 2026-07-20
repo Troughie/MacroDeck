@@ -154,7 +154,7 @@ if (!comp || !(comp instanceof CompItem)) {
     id: 'layer.shapesFromText',
     label: 'Create Shapes from Text',
     category: 'layer',
-    description: 'Converts every selected text layer to shapes at once, and for decomposed single-character layers keeps only that character — by position, so repeated letters (the two "l" in "Hello") stay correct',
+    description: 'Converts every selected text layer to shapes at once, and for decomposed single-character layers keeps only that character (drops the leftover glyphs AE outlines from the full source string)',
     jsx: `var comp = app.project.activeItem;
 if (!comp || !(comp instanceof CompItem)) {
   throw new Error("Open a composition first.");
@@ -181,100 +181,43 @@ if (!comp || !(comp instanceof CompItem)) {
     throw new Error("This After Effects version doesn't expose 'Create Shapes from Text'.");
   }
 
-  // Length of the layer's source string (the whole "Bouncy", not the one glyph).
-  function sourceLen(textLayer) {
-    try {
-      var doc = textLayer.property("ADBE Text Properties")
-                         .property("ADBE Text Document").value;
-      return doc && doc.text != null ? String(doc.text).length : 0;
-    } catch (e) { return 0; }
-  }
-
-  // Which single character index a decompose range selector reveals, or -1 if we
-  // can't tell. Decompose tools isolate one glyph with a 1-character range
-  // selector; we scan the animators for a selector whose start/end span exactly
-  // one character and return that start index (units may be % or Index).
-  function revealedIndex(textLayer, textLen) {
-    try {
-      var animators = textLayer.property("ADBE Text Properties")
-                               .property("ADBE Text Animators");
-      if (!animators) return -1;
-      for (var a = 1; a <= animators.numProperties; a++) {
-        var selectors = animators.property(a).property("ADBE Text Selectors");
-        if (!selectors) continue;
-        for (var sIdx = 1; sIdx <= selectors.numProperties; sIdx++) {
-          var selector = selectors.property(sIdx);
-          var sp = selector.property("ADBE Text Percent Start");
-          var ep = selector.property("ADBE Text Percent End");
-          if (!sp || !ep) continue;
-          var up = selector.property("ADBE Text Range Units");
-          var units = up ? up.value : 1; // 1 = Percentage, 2 = Index
-          var start, end;
-          if (units === 2) {
-            start = Math.round(sp.value);
-            end = Math.round(ep.value);
-          } else {
-            start = Math.round(sp.value / 100 * textLen);
-            end = Math.round(ep.value / 100 * textLen);
-          }
-          if (end - start === 1) return start; // exactly one revealed glyph
-        }
-      }
-    } catch (e) { /* fall through to name matching */ }
-    return -1;
-  }
-
-  // Keep only the glyph this layer actually represents. "Create Shapes from Text"
-  // outlines the FULL source string (it ignores decompose range selectors), so a
-  // layer named "y" ends up with every glyph of "Bouncy". The groups sit in
-  // source order, so:
-  //   1. If we know the revealed index, keep that group by POSITION — this is
-  //      the only thing that disambiguates repeated letters like "Hello".
-  //   2. Otherwise, if the layer's character occurs exactly once, keep it by name.
-  //   3. If the character repeats and we have no index, we can't safely pick one,
-  //      so we leave the layer untouched rather than delete the wrong glyph.
-  // Layers whose name matches no glyph (normal multi-character text) are skipped.
-  function pruneToGlyph(shapeLayer, target, revealedIdx) {
+  // Keep only the glyph group matching the layer name. Decompose-text tools
+  // leave the FULL source string ("Bouncy") on every one-character layer and
+  // just reveal a single glyph with a range selector; "Create Shapes from
+  // Text" ignores that selector and outlines the whole string, so a layer
+  // named "y" ends up with all of B/o/u/n/c/y as groups. Each group is named
+  // after its character, so we drop every group whose name isn't the target.
+  // Guarded by an exact name match, so normal multi-character text layers
+  // (no group named like the whole layer) are left completely untouched.
+  function pruneToGlyph(shapeLayer, target) {
     var contents = shapeLayer.property("ADBE Root Vectors Group");
+    if (!contents) contents = shapeLayer.property("Contents");
     if (!contents || contents.numProperties === 0) return;
-    var n = contents.numProperties;
 
-    var matches = [];
-    for (var g = 1; g <= n; g++) {
-      if (contents.property(g).name === target) matches.push(g);
+    var hasMatch = false;
+    for (var g = 1; g <= contents.numProperties; g++) {
+      if (contents.property(g).name === target) { hasMatch = true; break; }
     }
-    if (matches.length === 0) return; // not a decomposed glyph layer — leave as is
+    if (!hasMatch) return; // not a decomposed single-glyph layer — leave as is
 
-    var keep = -1;
-    if (revealedIdx >= 0 && revealedIdx + 1 <= n &&
-        contents.property(revealedIdx + 1).name === target) {
-      keep = revealedIdx + 1;       // position-derived — correct even for duplicates
-    } else if (matches.length === 1) {
-      keep = matches[0];            // unambiguous by name
-    } else {
-      return;                       // repeated letter, no index — don't risk it
-    }
-
-    for (var d = n; d >= 1; d--) {
-      if (d !== keep) {
-        try { contents.property(d).remove(); } catch (e) { /* not removable */ }
+    for (var d = contents.numProperties; d >= 1; d--) {
+      var group = contents.property(d);
+      if (group.name !== target && group.canSetEnabled !== false) {
+        try { group.remove(); } catch (e) { /* not removable — skip */ }
       }
     }
   }
 
   app.beginUndoGroup("Create Shapes from Text (batch)");
   for (var k = 0; k < textLayers.length; k++) {
-    var layer = textLayers[k];
-    var target = String(layer.name).replace(/^\\s+|\\s+$/g, "");
-    // Read the revealed index BEFORE conversion, while it's still a text layer.
-    var idx = revealedIndex(layer, sourceLen(layer));
+    var target = String(textLayers[k].name).replace(/^\\s+|\\s+$/g, "");
 
     // Isolate this text layer as the ONLY selection (also clears any shape
     // layers the previous iteration created and left selected).
     for (var m = 1; m <= comp.numLayers; m++) {
       comp.layer(m).selected = false;
     }
-    layer.selected = true;
+    textLayers[k].selected = true;
     app.executeCommand(cmdId);
 
     // AE selects the freshly created "<name> Outlines" shape layer. Find it and
@@ -282,7 +225,7 @@ if (!comp || !(comp instanceof CompItem)) {
     var created = comp.selectedLayers;
     for (var s = 0; s < created.length; s++) {
       if (created[s].property("ADBE Root Vectors Group")) {
-        pruneToGlyph(created[s], target, idx);
+        pruneToGlyph(created[s], target);
       }
     }
   }
