@@ -24,6 +24,7 @@ import {
 } from '../../src/types/macro.types';
 import { AE_SHORTCUTS } from '../../src/components/MacroSettings/ae/aeShortcuts';
 import { AE_PRESETS } from '../../src/components/MacroSettings/ae/aePresets';
+import { compileExpression } from '../../src/components/MacroSettings/ae/compileExpression';
 import { executeAeScript } from './ae.ipc';
 
 const execAsync = promisify(exec);
@@ -644,14 +645,19 @@ export async function executeMacro(macro: MacroConfig): Promise<boolean> {
           } else {
             // ── Script mode: resolve JSX and run via afterfx.exe -r ───────
             let jsx: string;
-            // Default to 'preset' when unset, matching the settings UI default.
-            if (s.scriptType !== 'custom') {
+            if (s.scriptType === 'expression') {
+              const list = storeRef?.get('aeExpressions', []) ?? [];
+              const expr = list.find(e => e.id === s.expressionId);
+              if (!expr) throw new Error('Saved expression not found.');
+              jsx = compileExpression(expr.expression, expr.target);
+            } else if (s.scriptType === 'custom') {
+              if (!s.script?.trim()) throw new Error('No JSX script configured.');
+              jsx = s.script;
+            } else {
+              // Default to 'preset' when unset, matching the settings UI default.
               const preset = AE_PRESETS.find(p => p.id === s.presetId);
               if (!preset) throw new Error(`No preset selected.`);
               jsx = preset.jsx;
-            } else {
-              if (!s.script?.trim()) throw new Error('No JSX script configured.');
-              jsx = s.script;
             }
             await executeAeScript(jsx);
             updateNotification(id, { type: 'success', title: name || 'AE script ran', duration: 2000 });
@@ -677,6 +683,7 @@ export async function executeMacro(macro: MacroConfig): Promise<boolean> {
 // ─── IPC Registration ─────────────────────────────────────────────────────────
 
 let mainWindowRef: import('electron').BrowserWindow | null = null;
+let storeRef: Store<StoreSchema> | null = null;
 
 async function executeProfileSwitch(settings: ProfileSwitchSettings): Promise<void> {
   if (!mainWindowRef || mainWindowRef.isDestroyed()) return;
@@ -687,8 +694,9 @@ async function executeProfileSwitch(settings: ProfileSwitchSettings): Promise<vo
   });
 }
 
-export function registerMacroIpc(_store: Store<StoreSchema>, mainWindow: import('electron').BrowserWindow | null): void {
+export function registerMacroIpc(store: Store<StoreSchema>, mainWindow: import('electron').BrowserWindow | null): void {
   mainWindowRef = mainWindow;
+  storeRef = store;
 
   ipcMain.handle('macro:execute', async (_event, macro: MacroConfig): Promise<boolean> => {
     return executeMacro(macro);
