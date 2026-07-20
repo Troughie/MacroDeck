@@ -1,5 +1,9 @@
 // ─── Macro Types ────────────────────────────────────────────────────────────
 
+import type { AeExprTarget } from '../components/MacroSettings/ae/compileExpression';
+
+export type { AeExprTarget };
+
 export type MacroType =
   | 'APP_LAUNCH'
   | 'WEB_LINK'
@@ -68,9 +72,10 @@ export interface ForceQuitSettings extends BaseSettings {
 export interface AeCommandSettings extends BaseSettings {
   mode: 'shortcut' | 'script';
   shortcutId?: string;       // used when mode === 'shortcut', e.g. 'timeline.ramPreview'
-  scriptType?: 'preset' | 'custom'; // used when mode === 'script'
+  scriptType?: 'preset' | 'custom' | 'expression'; // used when mode === 'script'
   presetId?: string;         // used when mode === 'script' && scriptType === 'preset'
   script?: string;           // used when mode === 'script' && scriptType === 'custom'
+  expressionId?: string;     // used when scriptType === 'expression'
 }
 
 export type MacroSettings =
@@ -177,6 +182,7 @@ export interface StoreSchema {
   activeProfileId: string;
   settings: AppSettings;
   aeScripts: AeSavedScript[]; // reusable custom JSX library, shared across keys
+  aeExpressions?: AeSavedExpression[]; // reusable custom expression library
 }
 
 // A user-saved custom JSX script, reusable across any AE macro key.
@@ -184,6 +190,16 @@ export interface AeSavedScript {
   id: string;
   name: string;
   jsx: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+// A user-saved custom expression, reusable across any AE macro key and the panel.
+export interface AeSavedExpression {
+  id: string;
+  name: string;
+  expression: string;   // raw expression, e.g. wiggle(3, 20)
+  target: AeExprTarget;  // selected property, or a fixed Transform property
   createdAt: number;
   updatedAt: number;
 }
