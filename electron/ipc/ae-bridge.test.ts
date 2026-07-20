@@ -12,6 +12,12 @@ import {
   readResponse,
   libraryPath,
   writeLibrary,
+  readHeartbeat,
+  isPanelAlive,
+  HEARTBEAT_MAX_AGE_MS,
+  executeViaPanel,
+  expressionsPath,
+  writeExpressions,
 } from './ae-bridge';
 
 describe('ae-bridge paths', () => {
@@ -61,8 +67,6 @@ describe('writeRequest / readResponse round-trip', () => {
   });
 });
 
-import { readHeartbeat, isPanelAlive, HEARTBEAT_MAX_AGE_MS } from './ae-bridge';
-
 describe('heartbeat + liveness', () => {
   const dir = path.join(os.tmpdir(), 'macrodeck', 'ae_bridge');
   beforeEach(() => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} });
@@ -103,8 +107,6 @@ describe('heartbeat + liveness', () => {
     expect(isPanelAlive(10_000)).toBe(false);
   });
 });
-
-import { executeViaPanel } from './ae-bridge';
 
 describe('executeViaPanel', () => {
   const dir = path.join(os.tmpdir(), 'macrodeck', 'ae_bridge');
@@ -196,8 +198,6 @@ describe('writeLibrary', () => {
     expect(raw).toEqual([]);
   });
 });
-
-import { expressionsPath, writeExpressions } from './ae-bridge';
 
 describe('expressionsPath', () => {
   it('places expressions.json under macrodeck/ae_bridge in tmp', () => {
