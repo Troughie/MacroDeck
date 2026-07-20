@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Play, AlertCircle, Save, Trash2, FolderOpen } from 'lucide-react';
+import { Play, AlertCircle, Save, Trash2, FolderOpen, Zap } from 'lucide-react';
 import { AE_PRESETS, AE_PRESET_CATEGORIES } from './aePresets';
 import { electronAPI } from '../../../lib/electron';
 import { useAeScriptStore } from '../../../stores/aeScriptStore';
+import { useAeExpressionStore } from '../../../stores/aeExpressionStore';
+import { AeExprTarget } from '../../../types/macro.types';
+import { compileExpression } from './compileExpression';
 
 interface Props {
   scriptType: 'preset' | 'custom' | 'expression';
@@ -27,9 +30,27 @@ export function AeScriptEditor({
 
   const { scripts, loaded, load, addScript, removeScript } = useAeScriptStore();
 
+  const {
+    expressions,
+    loaded: exprLoaded,
+    load: loadExpr,
+    addExpression,
+    removeExpression,
+  } = useAeExpressionStore();
+
+  const [exprText, setExprText] = useState('');
+  const [exprName, setExprName] = useState('');
+  const [exprTarget, setExprTarget] = useState<AeExprTarget>('selected');
+  const [exprTestStatus, setExprTestStatus] = useState<'idle' | 'running' | 'ok' | 'error'>('idle');
+  const [exprTestError, setExprTestError] = useState('');
+
   useEffect(() => {
     if (!loaded) load();
   }, [loaded, load]);
+
+  useEffect(() => {
+    if (!exprLoaded) loadExpr();
+  }, [exprLoaded, loadExpr]);
 
   const selectedPreset = AE_PRESETS.find(p => p.id === presetId);
 
@@ -64,6 +85,44 @@ export function AeScriptEditor({
     if (!jsx || !name) return;
     addScript(name, jsx);
     setSaveName('');
+  };
+
+  const EXPR_TARGETS: { value: AeExprTarget; label: string }[] = [
+    { value: 'selected', label: 'Selected property' },
+    { value: 'position', label: 'Position' },
+    { value: 'scale', label: 'Scale' },
+    { value: 'rotation', label: 'Rotation' },
+    { value: 'opacity', label: 'Opacity' },
+    { value: 'anchorPoint', label: 'Anchor Point' },
+  ];
+
+  const handleSaveExpression = () => {
+    const expr = exprText.trim();
+    const name = exprName.trim();
+    if (!expr || !name) return;
+    addExpression(name, expr, exprTarget);
+    setExprName('');
+  };
+
+  const handleTestExpression = async () => {
+    const expr = exprText.trim();
+    if (!expr) return;
+    setExprTestStatus('running');
+    setExprTestError('');
+    try {
+      const jsx = compileExpression(expr, exprTarget);
+      const result = await electronAPI?.ae.execute(jsx);
+      if (result?.ok) {
+        setExprTestStatus('ok');
+        setTimeout(() => setExprTestStatus('idle'), 2500);
+      } else {
+        setExprTestStatus('error');
+        setExprTestError(result?.error ?? 'Unknown error');
+      }
+    } catch (e: any) {
+      setExprTestStatus('error');
+      setExprTestError(e?.message ?? 'IPC error');
+    }
   };
 
   return (
@@ -193,6 +252,95 @@ export function AeScriptEditor({
               </div>
             </div>
           )}
+
+          {/* ── Expressions library ─────────────────────────────────────── */}
+          <div className="border-t border-border pt-3 space-y-3">
+            <label className="text-text-secondary text-xs font-medium flex items-center gap-1">
+              <Zap size={12} />
+              Expressions
+            </label>
+
+            <textarea
+              className="input-field w-full text-xs font-mono resize-y"
+              rows={3}
+              value={exprText}
+              onChange={e => setExprText(e.target.value)}
+              placeholder="wiggle(3, 20)"
+              spellCheck={false}
+            />
+
+            <div className="flex items-center gap-2">
+              <select
+                className="input-field text-xs py-1.5 flex-shrink-0"
+                value={exprTarget}
+                onChange={e => setExprTarget(e.target.value as AeExprTarget)}
+              >
+                {EXPR_TARGETS.map(t => (
+                  <option key={t.value} value={t.value}>{t.label}</option>
+                ))}
+              </select>
+              <input
+                type="text"
+                className="input-field flex-1 text-xs"
+                value={exprName}
+                onChange={e => setExprName(e.target.value)}
+                placeholder="Name this expression..."
+              />
+              <button
+                onClick={handleSaveExpression}
+                disabled={!exprText.trim() || !exprName.trim()}
+                className="btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1 disabled:opacity-50 flex-shrink-0"
+              >
+                <Save size={12} />
+                Save
+              </button>
+            </div>
+
+            <button
+              onClick={handleTestExpression}
+              disabled={exprTestStatus === 'running' || !exprText.trim()}
+              className="btn-secondary text-xs py-1.5 w-full flex items-center justify-center gap-1.5 disabled:opacity-50"
+            >
+              <Play size={12} />
+              {exprTestStatus === 'running' ? 'Running...' : exprTestStatus === 'ok' ? 'Success!' : 'Test Expression'}
+            </button>
+
+            {exprTestStatus === 'error' && (
+              <div className="flex items-start gap-2 p-2 rounded-lg bg-red-500/10 border border-red-500/20">
+                <AlertCircle size={12} className="text-red-400 flex-shrink-0 mt-0.5" />
+                <p className="text-red-300 text-xs">{exprTestError}</p>
+              </div>
+            )}
+
+            {expressions.length > 0 && (
+              <div className="rounded-lg border border-border overflow-y-auto max-h-48">
+                {expressions.map(e => (
+                  <div
+                    key={e.id}
+                    className="flex items-center gap-2 px-3 py-2 text-xs border-b border-border last:border-b-0 hover:bg-bg-hover group"
+                  >
+                    <button
+                      onClick={() => { setExprText(e.expression); setExprTarget(e.target); }}
+                      className="flex-1 text-left text-text-primary truncate"
+                      title="Load this expression into the editor"
+                    >
+                      {e.name}
+                    </button>
+                    <span className="text-text-muted flex-shrink-0 text-[10px] uppercase tracking-wide">
+                      {e.target === 'selected' ? 'selected' : e.target}
+                    </span>
+                    <button
+                      onClick={() => removeExpression(e.id)}
+                      className="text-text-muted hover:text-red-400 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="Delete expression"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </>
       )}
 
