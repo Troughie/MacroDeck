@@ -646,9 +646,9 @@ export async function executeMacro(macro: MacroConfig): Promise<boolean> {
             // ── Script mode: resolve JSX and run via afterfx.exe -r ───────
             let jsx: string;
             if (s.scriptType === 'expression') {
-              const list = storeRef?.get('aeExpressions', []) ?? [];
+              const list = storeRef!.get('aeExpressions', []);
               const expr = list.find(e => e.id === s.expressionId);
-              if (!expr) throw new Error('Saved expression not found.');
+              if (!expr) throw new Error(`Saved expression not found: ${s.expressionId}`);
               jsx = compileExpression(expr.expression, expr.target);
             } else if (s.scriptType === 'custom') {
               if (!s.script?.trim()) throw new Error('No JSX script configured.');
