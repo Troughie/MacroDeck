@@ -11,18 +11,22 @@ interface Props {
   scriptType: 'preset' | 'custom' | 'expression';
   presetId: string | undefined;
   customScript: string | undefined;
+  expressionId: string | undefined;
   onScriptTypeChange: (type: 'preset' | 'custom' | 'expression') => void;
   onPresetChange: (presetId: string) => void;
   onCustomScriptChange: (script: string) => void;
+  onExpressionChange: (expressionId: string) => void;
 }
 
 export function AeScriptEditor({
   scriptType,
   presetId,
   customScript,
+  expressionId,
   onScriptTypeChange,
   onPresetChange,
   onCustomScriptChange,
+  onExpressionChange,
 }: Props) {
   const [testStatus, setTestStatus] = useState<'idle' | 'running' | 'ok' | 'error'>('idle');
   const [testError, setTestError] = useState<string>('');
@@ -56,6 +60,10 @@ export function AeScriptEditor({
 
   const resolveJsx = (): string | null => {
     if (scriptType === 'preset') return selectedPreset?.jsx ?? null;
+    if (scriptType === 'expression') {
+      const bound = expressions.find(e => e.id === expressionId);
+      return bound ? compileExpression(bound.expression, bound.target) : null;
+    }
     return customScript ?? null;
   };
 
@@ -149,6 +157,16 @@ export function AeScriptEditor({
         >
           Custom JSX
         </button>
+        <button
+          onClick={() => onScriptTypeChange('expression')}
+          className={`flex-1 py-1.5 text-xs border-l border-border transition-colors ${
+            scriptType === 'expression'
+              ? 'bg-accent-blue/20 text-accent-blue'
+              : 'text-text-muted hover:text-text-primary hover:bg-bg-hover'
+          }`}
+        >
+          Expression
+        </button>
       </div>
 
       {scriptType === 'preset' ? (
@@ -184,6 +202,36 @@ export function AeScriptEditor({
               );
             })}
           </div>
+        </div>
+      ) : scriptType === 'expression' ? (
+        /* Bind a saved expression to this key */
+        <div>
+          <label className="text-text-secondary text-xs font-medium mb-1.5 flex items-center gap-1">
+            <Zap size={12} />
+            Bind a saved expression
+          </label>
+          {expressions.length === 0 ? (
+            <p className="text-text-muted text-xs">
+              No saved expressions yet. Create one under the Custom JSX tab, then pick it here.
+            </p>
+          ) : (
+            <div className="rounded-lg border border-border overflow-y-auto max-h-96">
+              {expressions.map(e => (
+                <button
+                  key={e.id}
+                  onClick={() => onExpressionChange(e.id)}
+                  className={`w-full text-left px-3 py-2 text-xs transition-colors border-b border-border last:border-b-0 flex items-center gap-2 ${
+                    e.id === expressionId
+                      ? 'bg-accent-blue/20 text-accent-blue'
+                      : 'text-text-primary hover:bg-bg-hover'
+                  }`}
+                >
+                  <span className="flex-1 truncate">{e.name}</span>
+                  <span className="text-text-muted flex-shrink-0 text-[10px] uppercase tracking-wide">{e.target}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       ) : (
         /* Custom JSX editor + reusable library */

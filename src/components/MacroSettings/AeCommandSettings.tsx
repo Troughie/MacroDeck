@@ -165,9 +165,11 @@ export function AeCommandSettings({ keyCode, macro, profileId }: Props) {
           scriptType={settings.scriptType ?? 'preset'}
           presetId={settings.presetId}
           customScript={settings.script}
+          expressionId={settings.expressionId}
           onScriptTypeChange={scriptType => update({ scriptType })}
           onPresetChange={presetId => update({ scriptType: 'preset', presetId })}
           onCustomScriptChange={script => update({ scriptType: 'custom', script })}
+          onExpressionChange={expressionId => update({ scriptType: 'expression', expressionId })}
         />
       )}
     </div>
