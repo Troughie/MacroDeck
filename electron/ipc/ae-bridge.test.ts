@@ -196,3 +196,30 @@ describe('writeLibrary', () => {
     expect(raw).toEqual([]);
   });
 });
+
+import { expressionsPath, writeExpressions } from './ae-bridge';
+
+describe('expressionsPath', () => {
+  it('places expressions.json under macrodeck/ae_bridge in tmp', () => {
+    const dir = path.join(os.tmpdir(), 'macrodeck', 'ae_bridge');
+    expect(expressionsPath()).toBe(path.join(dir, 'expressions.json'));
+  });
+});
+
+describe('writeExpressions', () => {
+  const dir = path.join(os.tmpdir(), 'macrodeck', 'ae_bridge');
+  beforeEach(() => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} });
+  afterEach(() => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} });
+
+  it('writes id/name/jsx entries', () => {
+    writeExpressions([{ id: 'e1', name: 'Wiggle', jsx: 'sel[0]...' }]);
+    const raw = JSON.parse(fs.readFileSync(expressionsPath(), 'utf8'));
+    expect(raw).toEqual([{ id: 'e1', name: 'Wiggle', jsx: 'sel[0]...' }]);
+  });
+
+  it('writes an empty array without throwing', () => {
+    expect(() => writeExpressions([])).not.toThrow();
+    const raw = JSON.parse(fs.readFileSync(expressionsPath(), 'utf8'));
+    expect(raw).toEqual([]);
+  });
+});

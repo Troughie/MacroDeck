@@ -11,6 +11,7 @@ export function requestPath(): string { return path.join(bridgeDir(), 'request.j
 export function responsePath(): string { return path.join(bridgeDir(), 'response.json'); }
 export function heartbeatPath(): string { return path.join(bridgeDir(), 'heartbeat.json'); }
 export function libraryPath(): string { return path.join(bridgeDir(), 'library.json'); }
+export function expressionsPath(): string { return path.join(bridgeDir(), 'expressions.json'); }
 
 function ensureBridgeDir(): void {
   const dir = bridgeDir();
@@ -49,6 +50,16 @@ export function writeLibrary(
   ensureBridgeDir();
   const slim = scripts.map(s => ({ id: s.id, name: s.name, jsx: s.jsx }));
   fs.writeFileSync(libraryPath(), JSON.stringify(slim), 'utf8');
+}
+
+// Writes pre-compiled expression JSX for the AE panel to read. Same one-way
+// contract as writeLibrary: MacroDeck writes, the panel reads.
+export function writeExpressions(
+  items: Array<{ id: string; name: string; jsx: string }>,
+): void {
+  ensureBridgeDir();
+  const slim = items.map(e => ({ id: e.id, name: e.name, jsx: e.jsx }));
+  fs.writeFileSync(expressionsPath(), JSON.stringify(slim), 'utf8');
 }
 
 export function readResponse(): BridgeResponse | null {
