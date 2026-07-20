@@ -23,12 +23,16 @@
   var responsePath = path.join(bridgeDir, 'response.json');
   var heartbeatPath = path.join(bridgeDir, 'heartbeat.json');
   var libraryPath = path.join(bridgeDir, 'library.json');
+  var expressionsPath = path.join(bridgeDir, 'expressions.json');
 
   var statusEl = document.getElementById('status');
   var lastEl = document.getElementById('last');
   var scriptsEl = document.getElementById('scripts');
   var emptyEl = document.getElementById('empty');
   var runResultEl = document.getElementById('runResult');
+  var expressionsEl = document.getElementById('expressions');
+  var exprEmptyEl = document.getElementById('exprEmpty');
+  var expressionsLabelEl = document.getElementById('expressionsLabel');
 
   var lastHandledId = null;
 
@@ -181,6 +185,54 @@
     renderLibrary(Array.isArray(scripts) ? scripts : []);
   }
 
+  // ─── Saved expressions: read expressions.json, render buttons, run on click ────
+  var lastExpressionsRaw = null;
+
+  function renderExpressions(items) {
+    if (!expressionsEl) return;
+    expressionsEl.textContent = '';
+
+    if (!items || items.length === 0) {
+      if (expressionsLabelEl) expressionsLabelEl.style.display = 'none';
+      if (exprEmptyEl) exprEmptyEl.textContent =
+        'No saved expressions yet — save one in MacroDeck to see it here.';
+      return;
+    }
+    if (exprEmptyEl) exprEmptyEl.textContent = '';
+    if (expressionsLabelEl) expressionsLabelEl.style.display = 'block';
+
+    for (var i = 0; i < items.length; i++) {
+      (function (e) {
+        var btn = document.createElement('button');
+        btn.textContent = e.name || '(unnamed)';
+        btn.addEventListener('click', function () {
+          runScript(e.name || '(unnamed)', e.jsx != null ? e.jsx : '');
+        });
+        expressionsEl.appendChild(btn);
+      })(items[i]);
+    }
+  }
+
+  function refreshExpressions() {
+    var raw;
+    try {
+      raw = fs.readFileSync(expressionsPath, 'utf8');
+    } catch (e) {
+      if (lastExpressionsRaw !== '') { lastExpressionsRaw = ''; renderExpressions([]); }
+      return;
+    }
+    if (raw === lastExpressionsRaw) return;
+    lastExpressionsRaw = raw;
+
+    var items;
+    try {
+      items = JSON.parse(raw);
+    } catch (e) {
+      return;
+    }
+    renderExpressions(Array.isArray(items) ? items : []);
+  }
+
   // ─── Heartbeat: refresh every second so MacroDeck sees the panel as alive ─────
   function heartbeat() {
     try {
@@ -196,7 +248,9 @@
   setStatus('Connected' + (aeVersion ? ' · AE ' + aeVersion : ''));
   heartbeat();
   refreshLibrary();
+  refreshExpressions();
   setInterval(poll, 150);
   setInterval(heartbeat, 1000);
   setInterval(refreshLibrary, 1000);
+  setInterval(refreshExpressions, 1000);
 })();
