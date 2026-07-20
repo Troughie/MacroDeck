@@ -1,4 +1,5 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain } from 'electron';
+import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, dialog } from 'electron';
+import fs from 'fs';
 import path from 'path';
 import Store from 'electron-store';
 import { StoreSchema, AppSettings } from '../src/types/macro.types';
@@ -10,6 +11,7 @@ import { registerSystemIpc, setWindowsStartup } from './ipc/system.ipc';
 import { registerAeIpc } from './ipc/ae.ipc';
 import { writeLibrary, writeExpressions } from './ipc/ae-bridge';
 import { compileExpression } from '../src/components/MacroSettings/ae/compileExpression';
+import { buildExportBundle, parseImportBundle } from './ipc/settings-transfer';
 import { ensureAppVolumeExe } from './native/appvolume';
 import { createNotificationWindow, registerNotificationIpc } from './notification-window';
 import { installFileLogger } from './debug-log';
@@ -231,6 +233,75 @@ function registerStoreIpc(): void {
   });
 }
 
+function registerBackupIpc(): void {
+  // Export the full config to a user-chosen .json file. Returns a small result
+  // object the renderer can surface (never throws across the IPC boundary).
+  ipcMain.handle('settings:export', async () => {
+    try {
+      const win = mainWindow ?? BrowserWindow.getFocusedWindow() ?? undefined;
+      const now = Date.now();
+      const stamp = new Date(now).toISOString().slice(0, 10); // YYYY-MM-DD
+      const result = await dialog.showSaveDialog(win!, {
+        title: 'Export MacroDeck Settings',
+        defaultPath: `macrodeck-settings-${stamp}.json`,
+        filters: [{ name: 'MacroDeck Backup', extensions: ['json'] }],
+      });
+      if (result.canceled || !result.filePath) {
+        return { ok: false, canceled: true };
+      }
+      const bundle = buildExportBundle(
+        {
+          macros: store.get('macros', {}),
+          settings: store.get('settings', {} as any),
+          aeScripts: store.get('aeScripts', []),
+          aeExpressions: store.get('aeExpressions', []),
+        },
+        now,
+      );
+      fs.writeFileSync(result.filePath, JSON.stringify(bundle, null, 2), 'utf8');
+      return { ok: true, filePath: result.filePath };
+    } catch (e: any) {
+      console.error('[main] settings:export failed:', e);
+      return { ok: false, error: e?.message ?? 'Export failed.' };
+    }
+  });
+
+  // Import a config file, replacing the current macros/settings/AE libraries.
+  // Validates before writing so a bad file can never half-apply. The renderer
+  // reloads its stores from disk on { ok: true }.
+  ipcMain.handle('settings:import', async () => {
+    try {
+      const win = mainWindow ?? BrowserWindow.getFocusedWindow() ?? undefined;
+      const result = await dialog.showOpenDialog(win!, {
+        title: 'Import MacroDeck Settings',
+        properties: ['openFile'],
+        filters: [{ name: 'MacroDeck Backup', extensions: ['json'] }],
+      });
+      if (result.canceled || result.filePaths.length === 0) {
+        return { ok: false, canceled: true };
+      }
+      const raw = fs.readFileSync(result.filePaths[0], 'utf8');
+      const parsed = parseImportBundle(raw);
+      if (!parsed.ok) {
+        return { ok: false, error: parsed.error };
+      }
+      // Replace wholesale — this is the "reinstalled my machine" restore path.
+      store.set('macros', parsed.data.macros);
+      store.set('settings', parsed.data.settings);
+      store.set('aeScripts', parsed.data.aeScripts);
+      store.set('aeExpressions', parsed.data.aeExpressions);
+      // Refresh the AE panel files and tray menu to match the imported config.
+      syncAeLibrary();
+      syncAeExpressions();
+      updateTrayMenu();
+      return { ok: true };
+    } catch (e: any) {
+      console.error('[main] settings:import failed:', e);
+      return { ok: false, error: e?.message ?? 'Import failed.' };
+    }
+  });
+}
+
 function registerWindowIpc(): void {
   ipcMain.handle('window:minimize', () => {
     mainWindow?.minimize();
@@ -268,6 +339,7 @@ app.whenReady().then(() => {
   createNotificationWindow();
 
   registerStoreIpc();
+  registerBackupIpc();
   registerWindowIpc();
   registerKeyboardIpc(mainWindow);
   registerAppsIpc();

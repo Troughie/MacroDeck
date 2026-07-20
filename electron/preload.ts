@@ -116,6 +116,14 @@ const electronAPI = {
       ipcRenderer.invoke('system:showWindow'),
   },
 
+  // ── Backup (export / import full config) ──────────────────────────────────
+  backup: {
+    export: (): Promise<{ ok: boolean; canceled?: boolean; filePath?: string; error?: string }> =>
+      ipcRenderer.invoke('settings:export'),
+    import: (): Promise<{ ok: boolean; canceled?: boolean; error?: string }> =>
+      ipcRenderer.invoke('settings:import'),
+  },
+
   // ── Profile ───────────────────────────────────────────────────────────────
   profile: {
     onSwitch: (callback: (data: { mode: string; targetProfileId?: string }) => void) => {

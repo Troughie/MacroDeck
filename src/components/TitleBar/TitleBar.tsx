@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Minus, Square, X, Keyboard, Settings, Power, EyeOff, Check } from 'lucide-react';
+import { Minus, Square, X, Keyboard, Settings, Power, EyeOff, Check, Upload, Download } from 'lucide-react';
 import { electronAPI } from '../../lib/electron';
+import { toast } from '../../stores/toastStore';
+import { useMacroStore, syncMacroKeysToMain } from '../../stores/macroStore';
+import { useProfileStore } from '../../stores/profileStore';
+import { useAeScriptStore } from '../../stores/aeScriptStore';
+import { useAeExpressionStore } from '../../stores/aeExpressionStore';
 
 export function TitleBar() {
   const [isMaximized, setIsMaximized] = useState(false);
@@ -44,6 +49,42 @@ export function TitleBar() {
   const handleStartMinimized = async (enabled: boolean) => {
     setStartMinimized(enabled);
     await electronAPI?.store.saveSettings({ runOnStartup, startMinimized: enabled, theme: 'dark' });
+  };
+
+  const handleExport = async () => {
+    setShowSettings(false);
+    const res = await electronAPI?.backup.export();
+    if (!res || res.canceled) return;
+    if (res.ok) {
+      toast.success('Settings exported', 'Backup file saved.', '💾');
+    } else {
+      toast.error('Export failed', res.error);
+    }
+  };
+
+  const handleImport = async () => {
+    setShowSettings(false);
+    const res = await electronAPI?.backup.import();
+    if (!res || res.canceled) return;
+    if (!res.ok) {
+      toast.error('Import failed', res.error);
+      return;
+    }
+    // Config was replaced in the main store — reload every store from disk so the
+    // UI reflects the imported macros, profiles, settings and AE libraries.
+    await Promise.all([
+      useProfileStore.getState().loadProfiles(),
+      useMacroStore.getState().loadMacros(),
+      useAeScriptStore.getState().load(),
+      useAeExpressionStore.getState().load(),
+    ]);
+    syncMacroKeysToMain(useProfileStore.getState().activeProfileId);
+    const s = await electronAPI?.store.loadSettings();
+    if (s) {
+      setRunOnStartup(s.runOnStartup ?? false);
+      setStartMinimized(s.startMinimized ?? false);
+    }
+    toast.success('Settings imported', 'Your macros and profiles were restored.', '✅');
   };
 
   return (
@@ -105,6 +146,32 @@ export function TitleBar() {
                   {startMinimized && <Check size={10} className="text-white" />}
                 </div>
               </button>
+
+              <div className="border-t border-border">
+                <div className="px-3 py-2">
+                  <span className="text-text-muted text-xs font-medium uppercase tracking-wider">Backup</span>
+                </div>
+                <button
+                  onClick={handleExport}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-bg-hover transition-colors text-left"
+                >
+                  <Download size={14} className="text-text-muted" />
+                  <div className="flex-1">
+                    <p className="text-text-primary text-xs font-medium">Export Settings</p>
+                    <p className="text-text-muted text-xs">Save all macros & profiles to a file</p>
+                  </div>
+                </button>
+                <button
+                  onClick={handleImport}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-bg-hover transition-colors text-left"
+                >
+                  <Upload size={14} className="text-text-muted" />
+                  <div className="flex-1">
+                    <p className="text-text-primary text-xs font-medium">Import Settings</p>
+                    <p className="text-text-muted text-xs">Restore from a backup file</p>
+                  </div>
+                </button>
+              </div>
 
               <div className="px-3 py-2 border-t border-border">
                 <p className="text-text-muted text-xs leading-relaxed">
