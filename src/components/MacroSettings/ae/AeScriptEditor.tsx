@@ -329,20 +329,27 @@ export function AeScriptEditor({
               </select>
               <input
                 type="text"
-                className="input-field flex-1 text-xs"
+                className="input-field flex-1 min-w-0 text-xs"
                 value={exprName}
                 onChange={e => setExprName(e.target.value)}
                 placeholder="Name this expression..."
               />
-              <button
-                onClick={handleSaveExpression}
-                disabled={!exprText.trim() || !exprName.trim()}
-                className="btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1 disabled:opacity-50 flex-shrink-0"
-              >
-                <Save size={12} />
-                Save
-              </button>
             </div>
+
+            <button
+              onClick={handleSaveExpression}
+              disabled={!exprText.trim() || !exprName.trim()}
+              className="btn-secondary text-xs py-1.5 w-full flex items-center justify-center gap-1.5 disabled:opacity-50"
+            >
+              <Save size={12} />
+              Save Expression
+            </button>
+
+            {exprText.trim() && !exprName.trim() && (
+              <p className="text-text-muted text-[11px] -mt-1">
+                Enter a name above to save this expression.
+              </p>
+            )}
 
             <button
               onClick={handleTestExpression}
