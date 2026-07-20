@@ -319,7 +319,7 @@ export function AeScriptEditor({
 
             <div className="flex items-center gap-2">
               <select
-                className="input-field text-xs py-1.5 flex-shrink-0"
+                className="input-field flex-1 min-w-0 text-xs py-1.5"
                 value={exprTarget}
                 onChange={e => setExprTarget(e.target.value as AeExprTarget)}
               >
