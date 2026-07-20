@@ -18,7 +18,7 @@ import { MACRO_TYPE_INFO, MacroType, MacroConfig } from './types/macro.types';
 import { electronAPI } from './lib/electron';
 
 export default function App() {
-  const { loadDevices, setKeyPressed, setKeyReleased } = useKeyboardStore();
+  const { loadDevices, setKeyPressed, setKeyReleased, clearKeys } = useKeyboardStore();
   const { loadMacros, assignMacro, selectedKeyCode, getMacrosForProfile } = useMacroStore();
   const { activeProfileId, loadProfiles } = useProfileStore();
 
@@ -70,7 +70,7 @@ export default function App() {
       if (event.state === 'down') {
         setKeyPressed(event.code);
         const macro = activeMacros[event.code];
-        if (macro && (event as any).isMacroDevice) {
+        if (macro && event.isMacroDevice) {
           executeMacroWithToast(macro);
         }
       } else {
@@ -79,6 +79,15 @@ export default function App() {
     });
     return () => { unsubscribe(); };
   }, [activeMacros, setKeyPressed, setKeyReleased]);
+
+  // When the main-process reader is replaced (re-select, self-heal, driver swap),
+  // any key held at that moment never gets its key-up — clear held state so nothing
+  // stays stuck-highlighted on the visualizer.
+  useEffect(() => {
+    if (!electronAPI) return;
+    const unsub = electronAPI.keyboard.onFlush(() => clearKeys());
+    return () => { unsub(); };
+  }, [clearKeys]);
 
   // ─── Execute macro — notifications handled by main process overlay ─────────
   const executeMacroWithToast = useCallback(async (macro: MacroConfig) => {
@@ -120,7 +129,7 @@ export default function App() {
           </span>
         </div>
 
-        <div className="flex flex-1 overflow-hidden gap-2 p-2">
+        <div className="flex flex-1 flex-0 overflow-hidden gap-2 p-2">
           <div className="w-[220px] flex-shrink-0">
             <KeyboardSelector />
           </div>
@@ -132,10 +141,10 @@ export default function App() {
               {selectedKeyCode && (
                 <motion.div
                   initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 420, opacity: 1 }}
+                  animate={{ height: 650, opacity: 1 }}
                   exit={{ height: 0, opacity: 0 }}
                   transition={{ type: 'spring', stiffness: 400, damping: 35 }}
-                  className="flex-shrink-0 overflow-hidden"
+                  className="overflow-hidden"
                 >
                   <MacroSettings keyCode={selectedKeyCode} />
                 </motion.div>

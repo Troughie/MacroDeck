@@ -27,6 +27,8 @@ export function AppLaunchSettings({ keyCode, macro, profileId }: Props) {
     try {
       if (!electronAPI) { setApps([]); setIsLoading(false); return; }
       const result = await electronAPI.apps.getInstalled();
+      console.log(result);
+
       setApps(result);
     } catch (err: any) {
       setError(err.message);
@@ -148,7 +150,7 @@ export function AppLaunchSettings({ keyCode, macro, profileId }: Props) {
       </div>
 
       {/* App list */}
-      <div className="space-y-0.5 overflow-y-auto" style={{ maxHeight: 220 }}>
+      <div className="space-y-0.5 overflow-y-auto" style={{ maxHeight: 420 }}>
         {isLoading ? (
           <div className="flex items-center justify-center py-6 gap-2">
             <RefreshCw size={14} className="animate-spin text-text-muted" />
@@ -183,7 +185,9 @@ export function AppLaunchSettings({ keyCode, macro, profileId }: Props) {
                 }
               `}
             >
-              <Rocket size={12} className="text-yellow-500 flex-shrink-0" />
+              {app.iconDataUrl
+                ? <img src={app.iconDataUrl} alt={app.name} width={32} height={32} />
+                : <Rocket size={12} className="text-yellow-500 flex-shrink-0" />}
               <span className="text-text-primary text-xs truncate flex-1">{app.name}</span>
               {settings.exePath === app.exePath && (
                 <CheckCircle2 size={12} className="text-accent-blue flex-shrink-0" />

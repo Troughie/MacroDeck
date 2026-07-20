@@ -1,13 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Minus, Square, X, Keyboard, Settings, Power, EyeOff, Check, AlertTriangle, Trash2 } from 'lucide-react';
+import { Minus, Square, X, Keyboard, Settings, Power, EyeOff, Check, Upload, Download } from 'lucide-react';
 import { electronAPI } from '../../lib/electron';
+import { toast } from '../../stores/toastStore';
+import { useMacroStore, syncMacroKeysToMain } from '../../stores/macroStore';
+import { useProfileStore } from '../../stores/profileStore';
+import { useAeScriptStore } from '../../stores/aeScriptStore';
+import { useAeExpressionStore } from '../../stores/aeExpressionStore';
 
 export function TitleBar() {
   const [isMaximized, setIsMaximized] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [runOnStartup, setRunOnStartup] = useState(false);
   const [startMinimized, setStartMinimized] = useState(false);
-  const [showUninstallConfirm, setShowUninstallConfirm] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -15,7 +19,6 @@ export function TitleBar() {
     electronAPI.window.isMaximized().then(setIsMaximized);
     const unsub = electronAPI.window.onMaximizeChange(setIsMaximized);
 
-    // Load current settings
     electronAPI.store.loadSettings().then((s: import('../../types/macro.types').AppSettings) => {
       if (s) {
         setRunOnStartup(s.runOnStartup ?? false);
@@ -26,7 +29,6 @@ export function TitleBar() {
     return () => { unsub(); };
   }, []);
 
-  // Close dropdown on outside click
   useEffect(() => {
     if (!showSettings) return;
     const handler = (e: MouseEvent) => {
@@ -49,21 +51,44 @@ export function TitleBar() {
     await electronAPI?.store.saveSettings({ runOnStartup, startMinimized: enabled, theme: 'dark' });
   };
 
-  const handleUninstallInterception = async () => {
-    if (!electronAPI) return;
-    const result = await electronAPI.system.uninstallInterception();
-    if (result) {
-      alert('Gỡ cài đặt Interception Driver thành công!\n\nVui lòng khởi động lại máy tính để hoàn tất quá trình.');
-    } else {
-      alert('Không thể gỡ Interception Driver. Vui lòng chạy installer thủ công.');
-    }
-    setShowUninstallConfirm(false);
+  const handleExport = async () => {
     setShowSettings(false);
+    const res = await electronAPI?.backup.export();
+    if (!res || res.canceled) return;
+    if (res.ok) {
+      toast.success('Settings exported', 'Backup file saved.', '💾');
+    } else {
+      toast.error('Export failed', res.error);
+    }
+  };
+
+  const handleImport = async () => {
+    setShowSettings(false);
+    const res = await electronAPI?.backup.import();
+    if (!res || res.canceled) return;
+    if (!res.ok) {
+      toast.error('Import failed', res.error);
+      return;
+    }
+    // Config was replaced in the main store — reload every store from disk so the
+    // UI reflects the imported macros, profiles, settings and AE libraries.
+    await Promise.all([
+      useProfileStore.getState().loadProfiles(),
+      useMacroStore.getState().loadMacros(),
+      useAeScriptStore.getState().load(),
+      useAeExpressionStore.getState().load(),
+    ]);
+    syncMacroKeysToMain(useProfileStore.getState().activeProfileId);
+    const s = await electronAPI?.store.loadSettings();
+    if (s) {
+      setRunOnStartup(s.runOnStartup ?? false);
+      setStartMinimized(s.startMinimized ?? false);
+    }
+    toast.success('Settings imported', 'Your macros and profiles were restored.', '✅');
   };
 
   return (
     <div className="h-10 flex items-center justify-between bg-bg-secondary border-b border-border flex-shrink-0 titlebar-drag">
-      {/* App Identity */}
       <div className="flex items-center gap-2 px-4 titlebar-no-drag">
         <div className="w-6 h-6 rounded-md bg-accent-blue flex items-center justify-center">
           <Keyboard size={14} className="text-white" />
@@ -72,10 +97,7 @@ export function TitleBar() {
         <span className="text-text-muted text-xs">v1.0.0</span>
       </div>
 
-      {/* Right side: Settings + Window Controls */}
       <div className="flex items-center titlebar-no-drag">
-
-        {/* Settings dropdown */}
         <div ref={settingsRef} className="relative">
           <button
             onClick={() => setShowSettings(v => !v)}
@@ -95,7 +117,6 @@ export function TitleBar() {
                 <span className="text-text-muted text-xs font-medium uppercase tracking-wider">App Settings</span>
               </div>
 
-              {/* Run on startup */}
               <button
                 onClick={() => handleRunOnStartup(!runOnStartup)}
                 className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-bg-hover transition-colors text-left"
@@ -111,7 +132,6 @@ export function TitleBar() {
                 </div>
               </button>
 
-              {/* Start minimized */}
               <button
                 onClick={() => handleStartMinimized(!startMinimized)}
                 className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-bg-hover transition-colors text-left"
@@ -127,42 +147,30 @@ export function TitleBar() {
                 </div>
               </button>
 
-              {/* Interception Warning & Uninstall */}
-              <div className="px-3 py-2.5 border-t border-border space-y-2">
-                <div className="flex items-start gap-2 p-2.5 bg-amber-900/20 border border-amber-700/40 rounded-md">
-                  <AlertTriangle size={12} className="text-amber-500 flex-shrink-0 mt-0.5" />
-                  <p className="text-text-muted text-xs leading-relaxed">
-                    Việc dùng Interception driver có thể bị một số game hoặc app nghi là phần mềm gian lận nên sẽ block phím hoặc chuột. Nếu bị hãy gỡ driver Interception tại đây và khởi động lại máy để khôi phục cài đặt.
-                  </p>
+              <div className="border-t border-border">
+                <div className="px-3 py-2">
+                  <span className="text-text-muted text-xs font-medium uppercase tracking-wider">Backup</span>
                 </div>
-
-                {!showUninstallConfirm ? (
-                  <button
-                    onClick={() => setShowUninstallConfirm(true)}
-                    className="w-full flex items-center gap-2 px-2.5 py-1.5 bg-red-900/20 hover:bg-red-900/30 border border-red-700/40 hover:border-red-700/60 rounded-md transition-colors"
-                  >
-                    <Trash2 size={12} className="text-red-400" />
-                    <span className="text-text-primary text-xs font-medium">Gỡ Interception Driver</span>
-                  </button>
-                ) : (
-                  <div className="space-y-2">
-                    <p className="text-text-secondary text-xs">Bạn chắc chứ? Máy phải khởi động lại!</p>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={handleUninstallInterception}
-                        className="flex-1 px-2 py-1 bg-red-600 hover:bg-red-700 text-white text-xs font-medium rounded transition-colors"
-                      >
-                        Gỡ ngay
-                      </button>
-                      <button
-                        onClick={() => setShowUninstallConfirm(false)}
-                        className="flex-1 px-2 py-1 bg-bg-hover hover:bg-bg-card text-text-primary text-xs font-medium rounded transition-colors border border-border"
-                      >
-                        Hủy
-                      </button>
-                    </div>
+                <button
+                  onClick={handleExport}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-bg-hover transition-colors text-left"
+                >
+                  <Download size={14} className="text-text-muted" />
+                  <div className="flex-1">
+                    <p className="text-text-primary text-xs font-medium">Export Settings</p>
+                    <p className="text-text-muted text-xs">Save all macros & profiles to a file</p>
                   </div>
-                )}
+                </button>
+                <button
+                  onClick={handleImport}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-bg-hover transition-colors text-left"
+                >
+                  <Upload size={14} className="text-text-muted" />
+                  <div className="flex-1">
+                    <p className="text-text-primary text-xs font-medium">Import Settings</p>
+                    <p className="text-text-muted text-xs">Restore from a backup file</p>
+                  </div>
+                </button>
               </div>
 
               <div className="px-3 py-2 border-t border-border">
@@ -174,7 +182,6 @@ export function TitleBar() {
           )}
         </div>
 
-        {/* Window controls */}
         <button
           onClick={() => electronAPI?.window.minimize()}
           className="w-10 h-10 flex items-center justify-center hover:bg-bg-hover text-text-secondary hover:text-text-primary transition-colors"

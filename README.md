@@ -1,216 +1,92 @@
 # MacroDeck
 
-Biến bất kỳ bàn phím nào thành macro keyboard chuyên dụng — tương tự StreamDeck nhưng dùng bàn phím thật.
+Bien mot ban phim phu thanh bo phim macro chuyen dung cho desktop.
 
-![MacroDeck Screenshot](assets/screenshot.png)
+## Cach hoat dong
 
-## Tính năng
+MacroDeck "dedicate" mot ban phim: doi driver cua no sang **WinUSB** (qua `wdi-simple` /
+libwdi, chay **elevated**), roi doc truc tiep **HID boot report** tu ban phim do. Khi da
+dedicate, ban phim do **NGUNG go vao Windows** va chi dung de trigger macro — nen khong bi
+go nham vao app dang focus. Bam **"Release to Windows"** de tra lai driver HID mac dinh
+(qua `pnputil`), khong can rut/cam lai.
 
-- 🎹 **Chọn bàn phím macro** — Chọn 1 bàn phím cụ thể làm macro device. Bàn phím đó sẽ bị disable hoàn toàn (không gõ văn bản), chỉ dùng để trigger macro
-- ⌨️ **Keyboard Visualizer** — Hiển thị layout bàn phím, animation khi nhấn phím
-- 🖱️ **Drag & Drop** — Kéo macro type từ panel phải thả vào phím bất kỳ để gán
-- 🚀 **6 loại macro:**
-  - **Launch App** — Mở ứng dụng đã cài
-  - **Web Link** — Mở URL trong trình duyệt
-  - **Media Control** — Play/Pause/Next/Prev
-  - **Mute Toggle** — Mute/Unmute system hoặc per-app
-  - **Volume Control** — Tăng/giảm/set âm lượng system hoặc per-app (Brave, Discord, Spotify...)
-  - **Hotkey** — Gửi tổ hợp phím
-- 💾 **Auto-save** — Cấu hình tự động lưu
-- 🔲 **System Tray** — Chạy nền, đóng cửa sổ không thoát app
-- ⚡ **Run on Startup** — Khởi động cùng Windows
+> Vi ban phim macro ngung go vao Windows khi dedicate, ban nen co **ban phim thu hai** de go binh thuong.
 
----
+## Tinh nang
 
-## Yêu cầu hệ thống
+- Dedicate mot ban phim thanh macro device (WinUSB), doc raw HID.
+- Keyboard visualizer voi trang thai phim va macro da gan.
+- Keo tha macro type vao phim de gan thao tac.
+- Ho tro macro: Launch App, Web Link, Media Control, Mute Toggle, Volume Control, Hotkey, Profile Switch.
+- Nhieu profile, chuyen profile bang macro.
+- Luu cau hinh tu dong, chay nen trong system tray, tuy chon khoi dong cung Windows.
 
-| Yêu cầu | Chi tiết |
+## Yeu cau he thong
+
+| Yeu cau | Chi tiet |
 |---|---|
-| OS | Windows 10/11 (64-bit) |
-| .NET Framework | 4.x (có sẵn trên Windows 10+) |
-| Interception Driver | **Bắt buộc** — xem hướng dẫn bên dưới |
-| RAM | ~100MB |
-| Disk | ~200MB |
+| OS | Windows 10/11 64-bit |
+| Quyen | Admin (UAC) khi Dedicate/Release de doi driver |
+| Ban phim | Nen co 2 ban phim (1 lam macro, 1 go binh thuong) |
+| Node.js | 18+ khi build tu source |
+| .NET Framework | 4.x cho helper audio/hotkey |
 
----
-
-## Cài đặt
-
-### Bước 1: Cài Interception Driver (TỰ ĐỘNG)
-
-MacroDeck dùng [Interception driver](https://github.com/oblitum/Interception) để phân biệt input từ từng bàn phím riêng biệt và suppress keystroke.
-
-**Cách cài:**
-
-**Tự động (khuyến nghị):**
-- Chạy installer `MacroDeck-Setup-1.0.0.exe`
-- Installer sẽ **tự động cài Interception driver** khi cài MacroDeck
-- Thực hiện theo hướng dẫn trên màn hình
-- **Khởi động lại máy tính** khi yêu cầu
-
-**Thủ công (nếu cần):**
-1. Download installer từ: https://github.com/oblitum/Interception/releases
-2. Giải nén, mở **Command Prompt as Administrator**
-3. Chạy:
-   ```cmd
-   install-interception.exe /install
-   ```
-4. **Restart máy tính**
-
-> ⚠️ **Lưu ý quan trọng:** Một số game hoặc anti-cheat software có thể nghi Interception driver là phần mềm gian lận và sẽ block input hoặc tắt máy. Nếu xảy ra vấn đề này, bạn có thể gỡ driver tại **Settings → Gỡ Interception Driver** (trong MacroDeck) hoặc gỡ thủ công bằng cách chạy:
-> ```cmd
-> install-interception.exe /uninstall
-> ```
-> Sau đó khởi động lại máy để khôi phục cài đặt.
-
-### Bước 2: Cài MacroDeck
-
-**Option A — Installer (khuyến nghị):**
-1. Download `MacroDeck-Setup-1.0.0.exe` từ [Releases](../../releases)
-2. Chạy installer (có thể cần click "More info" → "Run anyway" vì app chưa được ký)
-3. Chọn thư mục cài đặt → Install
-
-**Option B — Portable:**
-1. Download `MacroDeck-1.0.0-portable.exe`
-2. Chạy trực tiếp, không cần cài đặt
-
----
-
-## Build từ source
-
-### Yêu cầu
-
-- Node.js 18+
-- npm
-- .NET Framework 4.x SDK (để compile audio tools)
-
-### Các bước
+## Cai dat tu source
 
 ```bash
-# 1. Clone repo
-git clone https://github.com/yourusername/macrodeck.git
-cd macrodeck
-
-# 2. Cài dependencies
 npm install --legacy-peer-deps
-
-# 3. Chạy dev mode
 npm run dev
 ```
 
-### Build installer
+`resources/wdi-simple.exe` (libwdi) can co de dung tinh nang Dedicate/Release — xem
+[`resources/README.md`](resources/README.md).
 
-**Chạy PowerShell as Administrator**, sau đó:
-
-```powershell
-cd D:\path\to\macrodeck
-.\build.ps1
-```
-
-Hoặc build thủ công:
+## Build
 
 ```powershell
-# Set env vars để skip code signing
-$env:CSC_IDENTITY_AUTO_DISCOVERY = "false"
-$env:WIN_CSC_LINK = ""
-
-# Build
 npm run build
-npx electron-builder --win nsis --x64
+npm run dist:win
 ```
 
-Output sẽ ở thư mục `release/`.
+Output nam trong thu muc `release/`.
 
-> **Lưu ý:** Phải chạy as Administrator vì electron-builder cần tạo symlinks khi đóng gói.
+## Su dung
 
----
-
-## Hướng dẫn sử dụng
-
-### 1. Chọn bàn phím macro
-
-- Mở MacroDeck
-- Panel trái hiển thị danh sách bàn phím đang kết nối
-- Click **"Set as Macro Keyboard"** trên bàn phím muốn dùng
-- Bàn phím đó sẽ bị disable hoàn toàn (không gõ văn bản được nữa)
-
-### 2. Gán macro cho phím
-
-- Panel phải có 6 loại macro
-- **Kéo** một loại macro và **thả** vào phím bất kỳ trên keyboard visualizer
-- Panel dưới sẽ hiện ra để cấu hình chi tiết
-
-### 3. Cấu hình từng loại macro
-
-**Launch App:**
-- Tìm kiếm app trong danh sách
-- Click để chọn
-
-**Web Link:**
-- Nhập URL (vd: `https://youtube.com`)
-- Chọn trình duyệt (hoặc để Default)
-
-**Media Control:**
-- Chọn action: Play/Pause, Next, Previous
-- Chọn target: System (global) hoặc app cụ thể
-
-**Mute Toggle / Volume Control:**
-- Chọn target: Master Volume hoặc app đang phát âm thanh (Brave, Discord, Spotify...)
-- Volume Control: chọn Increase/Decrease/Set + giá trị %
-
-**Hotkey:**
-- Click vào ô "Record Shortcut"
-- Nhấn tổ hợp phím muốn gửi (vd: Ctrl+Shift+N)
-
-### 4. Chạy nền
-
-- Đóng cửa sổ → app ẩn xuống system tray (góc phải taskbar)
-- Double-click icon tray để mở lại
-- Right-click icon tray → **Quit** để thoát hoàn toàn
-
-### 5. Khởi động cùng Windows
-
-- Click icon ⚙️ trên titlebar
-- Bật **"Run on Startup"**
-- Tùy chọn bật **"Start Minimized"** để app tự ẩn khi khởi động
-
----
+1. Mo MacroDeck.
+2. Trong panel **Keyboards**, chon ban phim muon dung lam macro roi bam **"Set as Macro Keyboard"** (chap nhan UAC).
+3. Doi vai giay cho Windows re-enumerate; ban phim do ngung go vao Windows.
+4. Keo macro type vao phim tren keyboard visualizer va cau hinh chi tiet trong panel settings.
+5. Bam phim da gan de trigger macro.
+6. Xong thi bam **"Release to Windows"** de tra ban phim ve binh thuong.
 
 ## Troubleshooting
 
-**Bàn phím không được nhận diện:**
-- Kiểm tra Interception driver đã cài chưa: `install-interception.exe /is-installed`
-- Restart máy sau khi cài driver
-- Chạy MacroDeck as Administrator
+**Nut Dedicate/Release bi an hoac bao loi**
+- Can `resources/wdi-simple.exe` (xem `resources/README.md`). Neu thieu, `driverStatus.available = false` va nut Dedicate bi an.
+- Phai chap nhan UAC (thao tac chay elevated).
 
-**Macro không chạy:**
-- Kiểm tra đã chọn đúng bàn phím trong panel trái
-- Kiểm tra phím đã được gán macro (có label trên visualizer)
-- Xem log trong DevTools (Ctrl+Shift+I trong dev mode)
+**Ban phim khong phan hoi sau khi Dedicate**
+- Windows con dang re-enumerate — doi vai giay. Neu van khong duoc, rut/cam lai mot lan.
 
-**Volume/Mute không hoạt động với app cụ thể:**
-- App phải đang phát âm thanh thì mới xuất hiện trong danh sách
-- Thử mở app và phát audio trước khi cấu hình macro
+**Macro khong chay / phim bi "ket"**
+- Kiem tra da gan macro dung phim va dung ban phim macro dang duoc doc.
+- Xem log (ca ban dev lan ban exe): `%APPDATA%/MacroDeck/macrodeck-debug.log`.
 
-**App không khởi động:**
-- Đảm bảo .NET Framework 4.x đã cài (có sẵn trên Windows 10+)
-- Chạy as Administrator lần đầu để compile audio tools
-
----
+**Volume/Mute khong hoat dong voi app cu the**
+- App can dang co audio session thi moi xuat hien trong danh sach. Thu mo app va phat audio truoc.
 
 ## Tech Stack
 
 | Layer | Technology |
 |---|---|
-| Framework | Electron 29 + React 18 + TypeScript |
+| Framework | Electron + React 18 + TypeScript |
 | UI | Tailwind CSS + Framer Motion |
 | State | Zustand |
 | Storage | electron-store |
-| Keyboard Hook | node-interception (Interception driver) |
-| Audio Control | WASAPI via compiled C# (AppVolume.exe) |
+| Keyboard input | node-usb (libusb) doc HID boot report qua WinUSB |
+| Driver swap | libwdi (`wdi-simple.exe`) + `pnputil` |
+| Audio Control | WASAPI qua C# helper compiled |
 | Drag & Drop | @dnd-kit/core |
-
----
 
 ## License
 

@@ -1,6 +1,6 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, shell, dialog } from 'electron';
-import path from 'path';
+import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, dialog } from 'electron';
 import fs from 'fs';
+import path from 'path';
 import Store from 'electron-store';
 import { StoreSchema, AppSettings } from '../src/types/macro.types';
 import { registerKeyboardIpc } from './ipc/keyboard.ipc';
@@ -8,10 +8,13 @@ import { registerAppsIpc } from './ipc/apps.ipc';
 import { registerAudioIpc } from './ipc/audio.ipc';
 import { registerMacroIpc } from './ipc/macro.ipc';
 import { registerSystemIpc, setWindowsStartup } from './ipc/system.ipc';
+import { registerAeIpc } from './ipc/ae.ipc';
+import { writeLibrary, writeExpressions } from './ipc/ae-bridge';
+import { compileExpression } from '../src/components/MacroSettings/ae/compileExpression';
+import { buildExportBundle, parseImportBundle } from './ipc/settings-transfer';
 import { ensureAppVolumeExe } from './native/appvolume';
 import { createNotificationWindow, registerNotificationIpc } from './notification-window';
-
-// ─── Store Setup ─────────────────────────────────────────────────────────────
+import { installFileLogger } from './debug-log';
 
 const store = new Store<StoreSchema>({
   name: 'macrodeck-config',
@@ -25,16 +28,13 @@ const store = new Store<StoreSchema>({
       startMinimized: false,
       theme: 'dark',
     },
+    aeScripts: [],
+    aeExpressions: [],
   },
 });
 
-// ─── Asset path helper ───────────────────────────────────────────────────────
-// In dev: assets/ is at project root
-// In production: assets/ is bundled into the asar at dist/assets/ or via extraResources
-
 function getAssetPath(...parts: string[]): string {
   if (app.isPackaged) {
-    // In packaged app, assets are in resources/app.asar/assets/
     return path.join(__dirname, '../../../assets', ...parts);
   }
   return path.join(__dirname, '../../../assets', ...parts);
@@ -43,8 +43,6 @@ function getAssetPath(...parts: string[]): string {
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
-
-// ─── Window Creation ─────────────────────────────────────────────────────────
 
 function createWindow(): void {
   const settings = store.get('settings') as AppSettings;
@@ -64,27 +62,27 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      // MacroDeck runs in the tray with its window hidden most of the time. By
+      // default Chromium throttles hidden/occluded renderers (clamped timers,
+      // paused rendering), which would delay the keyboard:event handler that runs
+      // macros — the app must stay fully responsive while backgrounded.
+      backgroundThrottling: false,
     },
   });
 
-  // Load app
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
-    // __dirname in production = dist/electron/electron/
-    // renderer is at dist/renderer/index.html → go up 2 levels
     mainWindow.loadFile(path.join(__dirname, '../../renderer/index.html'));
   }
 
-  // Show when ready
   mainWindow.once('ready-to-show', () => {
     if (!settings.startMinimized) {
       mainWindow?.show();
     }
   });
 
-  // Hide to tray on close (don't quit)
   mainWindow.on('close', (e) => {
     e.preventDefault();
     mainWindow?.hide();
@@ -94,8 +92,6 @@ function createWindow(): void {
     mainWindow = null;
   });
 }
-
-// ─── Tray Setup ──────────────────────────────────────────────────────────────
 
 function createTray(): void {
   const iconPath = getAssetPath('tray-icon.png');
@@ -126,7 +122,6 @@ function updateTrayMenu(): void {
       type: 'checkbox',
       checked: settings.runOnStartup,
       click: async (item) => {
-        // Use Windows Registry via PowerShell (works with admin requirement)
         const result = await setWindowsStartup(item.checked);
         if (result) {
           store.set('settings.runOnStartup', item.checked);
@@ -162,7 +157,31 @@ function showWindow(): void {
   }
 }
 
-// ─── IPC: Store ───────────────────────────────────────────────────────────────
+// Refresh the AE panel's library.json. Wrapped so a write failure (e.g. the
+// bridge dir can't be created) is logged but never crashes the caller.
+function syncAeLibrary(): void {
+  try {
+    writeLibrary(store.get('aeScripts', []));
+  } catch (e) {
+    console.error('[main] writeLibrary failed:', e);
+  }
+}
+
+// Compile each saved expression to JSX and refresh the panel's expressions.json.
+// Wrapped so a write/compile failure is logged but never crashes the caller.
+function syncAeExpressions(): void {
+  try {
+    const exprs = store.get('aeExpressions', []);
+    const compiled = exprs.map(e => ({
+      id: e.id,
+      name: e.name,
+      jsx: compileExpression(e.expression, e.target),
+    }));
+    writeExpressions(compiled);
+  } catch (e) {
+    console.error('[main] writeExpressions failed:', e);
+  }
+}
 
 function registerStoreIpc(): void {
   ipcMain.handle('store:saveMacros', (_event, macros) => {
@@ -192,9 +211,96 @@ function registerStoreIpc(): void {
   ipcMain.handle('store:loadDevice', () => {
     return store.get('selectedDeviceId', '');
   });
+
+  ipcMain.handle('store:saveAeScripts', (_event, scripts) => {
+    store.set('aeScripts', scripts);
+    syncAeLibrary();
+    return true;
+  });
+
+  ipcMain.handle('store:loadAeScripts', () => {
+    return store.get('aeScripts', []);
+  });
+
+  ipcMain.handle('store:saveAeExpressions', (_event, expressions) => {
+    store.set('aeExpressions', expressions);
+    syncAeExpressions();
+    return true;
+  });
+
+  ipcMain.handle('store:loadAeExpressions', () => {
+    return store.get('aeExpressions', []);
+  });
 }
 
-// ─── IPC: Window Controls ─────────────────────────────────────────────────────
+function registerBackupIpc(): void {
+  // Export the full config to a user-chosen .json file. Returns a small result
+  // object the renderer can surface (never throws across the IPC boundary).
+  ipcMain.handle('settings:export', async () => {
+    try {
+      const win = mainWindow ?? BrowserWindow.getFocusedWindow() ?? undefined;
+      const now = Date.now();
+      const stamp = new Date(now).toISOString().slice(0, 10); // YYYY-MM-DD
+      const result = await dialog.showSaveDialog(win!, {
+        title: 'Export MacroDeck Settings',
+        defaultPath: `macrodeck-settings-${stamp}.json`,
+        filters: [{ name: 'MacroDeck Backup', extensions: ['json'] }],
+      });
+      if (result.canceled || !result.filePath) {
+        return { ok: false, canceled: true };
+      }
+      const bundle = buildExportBundle(
+        {
+          macros: store.get('macros', {}),
+          settings: store.get('settings', {} as any),
+          aeScripts: store.get('aeScripts', []),
+          aeExpressions: store.get('aeExpressions', []),
+        },
+        now,
+      );
+      fs.writeFileSync(result.filePath, JSON.stringify(bundle, null, 2), 'utf8');
+      return { ok: true, filePath: result.filePath };
+    } catch (e: any) {
+      console.error('[main] settings:export failed:', e);
+      return { ok: false, error: e?.message ?? 'Export failed.' };
+    }
+  });
+
+  // Import a config file, replacing the current macros/settings/AE libraries.
+  // Validates before writing so a bad file can never half-apply. The renderer
+  // reloads its stores from disk on { ok: true }.
+  ipcMain.handle('settings:import', async () => {
+    try {
+      const win = mainWindow ?? BrowserWindow.getFocusedWindow() ?? undefined;
+      const result = await dialog.showOpenDialog(win!, {
+        title: 'Import MacroDeck Settings',
+        properties: ['openFile'],
+        filters: [{ name: 'MacroDeck Backup', extensions: ['json'] }],
+      });
+      if (result.canceled || result.filePaths.length === 0) {
+        return { ok: false, canceled: true };
+      }
+      const raw = fs.readFileSync(result.filePaths[0], 'utf8');
+      const parsed = parseImportBundle(raw);
+      if (!parsed.ok) {
+        return { ok: false, error: parsed.error };
+      }
+      // Replace wholesale — this is the "reinstalled my machine" restore path.
+      store.set('macros', parsed.data.macros);
+      store.set('settings', parsed.data.settings);
+      store.set('aeScripts', parsed.data.aeScripts);
+      store.set('aeExpressions', parsed.data.aeExpressions);
+      // Refresh the AE panel files and tray menu to match the imported config.
+      syncAeLibrary();
+      syncAeExpressions();
+      updateTrayMenu();
+      return { ok: true };
+    } catch (e: any) {
+      console.error('[main] settings:import failed:', e);
+      return { ok: false, error: e?.message ?? 'Import failed.' };
+    }
+  });
+}
 
 function registerWindowIpc(): void {
   ipcMain.handle('window:minimize', () => {
@@ -218,45 +324,35 @@ function registerWindowIpc(): void {
   });
 }
 
-// ─── App Lifecycle ────────────────────────────────────────────────────────────
-
 app.whenReady().then(() => {
-  // Check if Interception installation requires restart
-  const restartFlagPath = path.join(process.env.LOCALAPPDATA || '', 'MacroDeck', 'need-restart-for-interception.flag');
-  if (fs.existsSync(restartFlagPath)) {
-    // Show dialog and exit
-    dialog.showErrorBox(
-      'Cần khởi động lại máy',
-      'Interception Driver đã được cài đặt thành công!\n\nMáy tính cần khởi động lại để driver hoạt động.\n\nVui lòng khởi động lại máy và chạy MacroDeck lại.'
-    );
-    // Clean up flag file
-    try {
-      fs.unlinkSync(restartFlagPath);
-    } catch (e) {
-      console.error('[main] Failed to remove restart flag:', e);
-    }
-    app.quit();
-    return;
-  }
+  installFileLogger();
 
-  // Pre-compile AppVolume.exe in background
   setTimeout(() => {
-    try { ensureAppVolumeExe(); } catch (e) { console.error('[main] AppVolume compile failed:', e); }
+    // Fire-and-forget async compile; errors are logged, never block startup.
+    ensureAppVolumeExe().catch((e) => {
+      console.error('[main] AppVolume compile failed:', e);
+    });
   }, 2000);
 
   createWindow();
   createTray();
   createNotificationWindow();
 
-  // Register all IPC handlers
   registerStoreIpc();
+  registerBackupIpc();
   registerWindowIpc();
   registerKeyboardIpc(mainWindow);
   registerAppsIpc();
   registerAudioIpc();
   registerMacroIpc(store, mainWindow);
   registerSystemIpc(store, mainWindow, updateTrayMenu);
+  registerAeIpc();
   registerNotificationIpc();
+
+  // Seed the AE panel's library.json so it has data even if the user changes
+  // nothing this session (the panel reads the last-written file).
+  syncAeLibrary();
+  syncAeExpressions();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -265,7 +361,6 @@ app.whenReady().then(() => {
   });
 });
 
-// Prevent multiple instances
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
@@ -276,11 +371,9 @@ if (!gotTheLock) {
 }
 
 app.on('window-all-closed', () => {
-  // Don't quit on Windows — stay in tray
   if (process.platform !== 'darwin') {
-    // Keep running
+    return;
   }
 });
 
-// Export for IPC modules
 export { mainWindow, store };

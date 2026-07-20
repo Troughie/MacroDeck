@@ -55,6 +55,8 @@ function getDefaultSettings(type: MacroType, keyCode: string) {
     case 'MUTE_TOGGLE':  return { displayName, target: 'master', targetName: 'Master Volume' };
     case 'VOLUME_ADJUST':return { displayName, target: 'master', targetName: 'Master Volume', delta: 10, mode: 'increase' as const };
     case 'HOTKEY':       return { displayName, keys: [] };
+    case 'FORCE_QUIT':   return { displayName: 'Force Quit', target: 'foreground' as const };
+    case 'AE_COMMAND':   return { displayName, mode: 'shortcut' as const };
     default:             return { displayName };
   }
 }

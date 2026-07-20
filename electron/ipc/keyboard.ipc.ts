@@ -1,322 +1,180 @@
 import { ipcMain, BrowserWindow } from 'electron';
-import path from 'path';
-import fs from 'fs';
-import os from 'os';
 import { KeyboardDevice, KeyEvent } from '../../src/types/macro.types';
+import { listUsbKeyboards } from '../native/usb-enum';
+import { parseDeviceKey } from '../native/usb-device-id';
+import { openKeyboardReader, KeyboardReader } from '../native/hid-keyboard';
+import { isDriverToolAvailable, dedicate, restore } from '../native/winusb-driver';
 
-// ─── State ────────────────────────────────────────────────────────────────────
-
-let selectedDeviceKey = '';
 let mainWindowRef: BrowserWindow | null = null;
-let ic: any = null;
-let listenerActive = false;
+let selectedDeviceKey = '';
+let reader: KeyboardReader | null = null;
+let devices: KeyboardDevice[] = [];
 
-const tmpDir = path.join(os.tmpdir(), 'macrodeck');
-function ensureTmpDir() {
-  if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+const assignedKeyCodes = new Set<string>();
+
+// A monotonically-increasing token identifying the "current" reader intent. Any
+// startReader()/stopReader() bumps it, so an in-flight open-retry loop or a
+// scheduled self-heal from an older intent cancels itself instead of leaving a
+// stale reader behind.
+let readerGeneration = 0;
+
+// The device the reader is currently bound to (or actively opening). Used to make
+// keyboard:select idempotent. App.tsx AND KeyboardSelector both call loadDevices()
+// on mount, so keyboard:select fires twice in quick succession. findByIds() returns
+// a SINGLETON libusb Device per VID/PID, so opening a second reader for the same
+// device collides with the first on the shared handle — "Can't close device with a
+// pending request" / LIBUSB_ERROR_NOT_FOUND — which kills the poll and looks like a
+// stuck key (no more key events until restart). Skipping the redundant open avoids
+// it. This race only surfaced in the packaged app, where faster startup fires the
+// two selects close enough together to overlap.
+let activeDeviceKey: string | null = null;
+
+// After a driver swap (dedicate) Windows re-enumerates the device, which takes a
+// few seconds; opening it too early fails or yields an unstable endpoint. We
+// retry opening until it settles. findByIds() re-reads the device list on each
+// attempt, so it picks up the fresh WinUSB handle once re-enumeration completes.
+const OPEN_RETRY_INTERVAL_MS = 500;
+const OPEN_MAX_ATTEMPTS = 30; // ~15s
+const SELF_HEAL_DELAY_MS = 1000;
+
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+// Serializes every reader open/close so two intents never overlap on the shared
+// libusb Device handle. Each queued operation runs to completion before the next
+// begins; without this a teardown can cancel transfers out from under a concurrent
+// open — the root cause of the stuck-key poll death on the packaged app.
+let opChain: Promise<void> = Promise.resolve();
+function serialize(op: () => Promise<void>): Promise<void> {
+  const run = opChain.then(op, op);
+  opChain = run.catch(() => { /* keep the chain alive after a failed op */ });
+  return run;
 }
 
-// ─── Scan code → KeyboardEvent.code ──────────────────────────────────────────
-
-const SCAN_TO_CODE: Record<number, string> = {
-  1:'Escape',2:'Digit1',3:'Digit2',4:'Digit3',5:'Digit4',6:'Digit5',
-  7:'Digit6',8:'Digit7',9:'Digit8',10:'Digit9',11:'Digit0',
-  12:'Minus',13:'Equal',14:'Backspace',15:'Tab',
-  16:'KeyQ',17:'KeyW',18:'KeyE',19:'KeyR',20:'KeyT',
-  21:'KeyY',22:'KeyU',23:'KeyI',24:'KeyO',25:'KeyP',
-  26:'BracketLeft',27:'BracketRight',28:'Enter',29:'ControlLeft',
-  30:'KeyA',31:'KeyS',32:'KeyD',33:'KeyF',34:'KeyG',
-  35:'KeyH',36:'KeyJ',37:'KeyK',38:'KeyL',
-  39:'Semicolon',40:'Quote',41:'Backquote',42:'ShiftLeft',43:'Backslash',
-  44:'KeyZ',45:'KeyX',46:'KeyC',47:'KeyV',48:'KeyB',
-  49:'KeyN',50:'KeyM',51:'Comma',52:'Period',53:'Slash',
-  54:'ShiftRight',55:'NumpadMultiply',56:'AltLeft',57:'Space',58:'CapsLock',
-  59:'F1',60:'F2',61:'F3',62:'F4',63:'F5',64:'F6',
-  65:'F7',66:'F8',67:'F9',68:'F10',69:'NumLock',70:'ScrollLock',
-  71:'Numpad7',72:'Numpad8',73:'Numpad9',74:'NumpadSubtract',
-  75:'Numpad4',76:'Numpad5',77:'Numpad6',78:'NumpadAdd',
-  79:'Numpad1',80:'Numpad2',81:'Numpad3',82:'Numpad0',83:'NumpadDecimal',
-  87:'F11',88:'F12',
-};
-
-const SCAN_EXT: Record<number, string> = {
-  28:'NumpadEnter',29:'ControlRight',53:'NumpadDivide',56:'AltRight',
-  71:'Home',72:'ArrowUp',73:'PageUp',75:'ArrowLeft',77:'ArrowRight',
-  79:'End',80:'ArrowDown',81:'PageDown',82:'Insert',83:'Delete',
-  91:'MetaLeft',92:'MetaRight',93:'ContextMenu',
-};
-
-function strokeToCode(stroke: any): string {
-  const scanCode: number = stroke.code ?? 0;
-  const state: number = stroke.state ?? 0;
-  const isExt = (state & 0x02) !== 0;
-  if (isExt && SCAN_EXT[scanCode]) return SCAN_EXT[scanCode];
-  return SCAN_TO_CODE[scanCode] ?? `SC${scanCode}`;
+// Tells the renderer to clear its "keys currently held" state. Called when a
+// reader goes away: the delta-based reader derives key-ups by diffing against the
+// previous report, so any key physically held across a teardown never produces an
+// up — leaving it stuck-highlighted (and stuck in pressedKeys) until restart.
+function flushPressedKeys(): void {
+  if (!mainWindowRef || mainWindowRef.isDestroyed()) return;
+  mainWindowRef.webContents.send('keyboard:flush');
 }
 
-function strokeIsUp(stroke: any): boolean {
-  // Interception KeyState: KEY_DOWN=0, KEY_UP=1, KEY_E0=2, KEY_E1=4
-  return (stroke.state & 0x01) !== 0;
-}
-
-// ─── Enumerate keyboards ──────────────────────────────────────────────────────
-
-function getKeyboards(): KeyboardDevice[] {
-  let tempIc: any = null;
-  try {
-    const { Interception, FilterKeyState } = require('node-interception');
-    tempIc = new Interception();
-    tempIc.setFilter('keyboard', FilterKeyState.ALL);
-    const keyboards: any[] = tempIc.getKeyboards();
-
-    const devices: KeyboardDevice[] = keyboards
-      .filter((kb: any) => !kb.isInvalid())
-      .map((kb: any) => {
-        const hwid: string = kb.getHardwareId() ?? '';
-        const vidMatch = hwid.match(/VID_([0-9A-Fa-f]{4})/i);
-        const pidMatch = hwid.match(/PID_([0-9A-Fa-f]{4})/i);
-        const miMatch  = hwid.match(/MI_([0-9A-Fa-f]{2})/i);
-        const vid = vidMatch ? parseInt(vidMatch[1], 16) : 0;
-        const pid = pidMatch ? parseInt(pidMatch[1], 16) : 0;
-        const mi  = miMatch  ? parseInt(miMatch[1],  16) : -1;
-        const vidHex = vid.toString(16).toUpperCase().padStart(4, '0');
-        const pidHex = pid.toString(16).toUpperCase().padStart(4, '0');
-        const deviceKey = `interception:${kb.id}`;
-        return {
-          id: deviceKey,
-          name: `Keyboard ${kb.id} (${vidHex}:${pidHex})`,
-          vendorId: vid,
-          productId: pid,
-          interfaceNumber: mi,   // -1 = single-interface device (no MI_ in hwid)
-          hwid,
-          isSelected: deviceKey === selectedDeviceKey,
-          isConnected: true,
-        };
-      });
-
-    // Enrich with bus-reported device names (exact names from USB descriptor)
-    // Uses DEVPKEY_Device_BusReportedDeviceDesc which is the real device name
-    // reported by the hardware itself, visible under "Human Interface Devices"
-    try {
-      ensureTmpDir();
-      const { execFileSync } = require('child_process');
-      // Query HID devices (not just Keyboard class) to get bus-reported names
-      // then fall back to Keyboard class FriendlyName if not found
-      const ps = `
-$result = @()
-$hidDevices = Get-PnpDevice -Class HIDClass -ErrorAction SilentlyContinue
-foreach ($d in $hidDevices) {
-  $hwids = $d.HardwareID
-  if (-not $hwids) { continue }
-  $busName = (Get-PnpDeviceProperty -InputObject $d -KeyName 'DEVPKEY_Device_BusReportedDeviceDesc' -ErrorAction SilentlyContinue).Data
-  $result += [PSCustomObject]@{
-    Name = if ($busName) { $busName } else { $d.FriendlyName }
-    HardwareID = $hwids
+// Releases the current reader's USB interfaces and WAITS for the handle to close.
+// Awaiting matters before opening another reader or a driver swap: if the WinUSB
+// handle is still held, the next open races it (pending-request errors).
+async function teardownReader(): Promise<void> {
+  const current = reader;
+  reader = null;
+  if (current) {
+    flushPressedKeys(); // held keys won't get an 'up' once this reader is gone
+    try { await current.close(); } catch { /* ignore */ }
   }
 }
-$kbDevices = Get-PnpDevice -Class Keyboard -ErrorAction SilentlyContinue
-foreach ($d in $kbDevices) {
-  $hwids = $d.HardwareID
-  if (-not $hwids) { continue }
-  $busName = (Get-PnpDeviceProperty -InputObject $d -KeyName 'DEVPKEY_Device_BusReportedDeviceDesc' -ErrorAction SilentlyContinue).Data
-  $result += [PSCustomObject]@{
-    Name = if ($busName) { $busName } else { $d.FriendlyName }
-    HardwareID = $hwids
-  }
-}
-$result | ConvertTo-Json -Compress -Depth 3
-`.trim();
-      const scriptPath = path.join(tmpDir, 'pnp.ps1');
-      fs.writeFileSync(scriptPath, ps, 'utf8');
-      const out = execFileSync('powershell', [
-        '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath,
-      ], { timeout: 12000 }).toString().trim();
-      if (out) {
-        const raw = JSON.parse(out);
-        const pnpList: any[] = Array.isArray(raw) ? raw : [raw];
-        devices.forEach(dev => {
-          const vidHex = dev.vendorId.toString(16).toUpperCase().padStart(4, '0');
-          const pidHex = dev.productId.toString(16).toUpperCase().padStart(4, '0');
-          const mi = dev.interfaceNumber ?? -1;
-          const miHex = mi >= 0
-            ? mi.toString(16).toUpperCase().padStart(2, '0')
-            : null;
 
-          // Try to match by VID+PID+MI (exact interface match first)
-          let match = miHex
-            ? pnpList.find((p: any) => {
-                const hwids: string[] = Array.isArray(p.HardwareID) ? p.HardwareID : [p.HardwareID ?? ''];
-                return hwids.some((h: string) =>
-                  h?.toUpperCase().includes(`VID_${vidHex}`) &&
-                  h?.toUpperCase().includes(`PID_${pidHex}`) &&
-                  h?.toUpperCase().includes(`MI_${miHex}`)
-                );
-              })
-            : null;
+// Opens the reader for a device, tearing down any previous reader FIRST so a close
+// never races its own open. Retries while Windows finishes re-enumerating a
+// just-swapped device. Bails immediately once a newer intent bumps the generation.
+async function openReader(deviceKey: string, generation: number): Promise<void> {
+  if (generation !== readerGeneration) return;
+  await teardownReader();
+  const ids = parseDeviceKey(deviceKey);
+  if (!ids) return;
 
-          // Fall back to VID+PID only
-          if (!match) {
-            match = pnpList.find((p: any) => {
-              const hwids: string[] = Array.isArray(p.HardwareID) ? p.HardwareID : [p.HardwareID ?? ''];
-              return hwids.some((h: string) =>
-                h?.toUpperCase().includes(`VID_${vidHex}`) &&
-                h?.toUpperCase().includes(`PID_${pidHex}`)
-              );
-            });
-          }
+  const onDelta = (delta: { code: string; state: 'down' | 'up' }) => {
+    // Only forward keys assigned to a macro (matches previous behaviour).
+    if (!assignedKeyCodes.has(delta.code)) return;
+    if (!mainWindowRef || mainWindowRef.isDestroyed()) return;
+    mainWindowRef.webContents.send('keyboard:event', {
+      code: delta.code,
+      keycode: 0,
+      state: delta.state,
+      deviceId: deviceKey,
+      isMacroDevice: true,
+    } as KeyEvent);
+  };
 
-          if (!match?.Name) return;
-
-          const baseName = match.Name !== 'HID Keyboard Device'
-            ? match.Name
-            : `HID Keyboard Device (${vidHex}:${pidHex})`;
-
-          // Label non-primary interfaces so user knows which one sends keystrokes
-          if (mi > 0) {
-            dev.name = `${baseName} [Interface ${mi}]`;
-          } else {
-            dev.name = baseName;
-          }
-        });
-      }
-    } catch { /* ignore PnP errors */ }
-
-    // Mark devices that are likely not real keyboards based on their name
-    const NON_KEYBOARD_PATTERN = /mouse|receiver|trackpad|touchpad|trackball|pointer|gamepad|joystick/i;
-    devices.forEach(dev => {
-      dev.isKeyboard = !NON_KEYBOARD_PATTERN.test(dev.name);
+  // Called only when the reader's internal poll recovery is exhausted (a dead
+  // endpoint, e.g. on a half-re-enumerated handle). Re-open the device from
+  // scratch — serialized and after a full teardown — so it self-heals once the
+  // device is stable again instead of leaving one key "stuck" and no further input.
+  const onError = (err: Error) => {
+    if (generation !== readerGeneration) return; // superseded already
+    console.warn('[keyboard.ipc] reader poll died, re-opening:', err.message);
+    delay(SELF_HEAL_DELAY_MS).then(() => {
+      if (generation !== readerGeneration) return;
+      void serialize(() => openReader(deviceKey, generation));
     });
+  };
 
-    // Only keep primary keyboard interfaces:
-    // - interfaceNumber === 0 (MI_00 = main keyboard interface)
-    // - interfaceNumber === -1 (no MI_ in hwid = single-interface device)
-    // Filter out secondary interfaces (MI_01, MI_02...) like consumer control, vendor-defined, etc.
-    return devices.filter(dev => (dev.interfaceNumber ?? -1) <= 0);
-  } catch (err: any) {
-    console.error('[keyboard.ipc] getKeyboards failed:', err.message?.slice(0, 100));
-    return [];
-  } finally {
-    try { tempIc?.destroy(); } catch {}
+  for (let attempt = 1; attempt <= OPEN_MAX_ATTEMPTS; attempt++) {
+    if (generation !== readerGeneration) return; // superseded while waiting
+    try {
+      const opened = openKeyboardReader(ids.vendorId, ids.productId, onDelta, onError);
+      if (generation !== readerGeneration) {
+        // A newer select/stop happened while opening — discard this one.
+        try { opened.close(); } catch { /* ignore */ }
+        return;
+      }
+      reader = opened;
+      console.log(`[keyboard.ipc] Reading WinUSB keyboard: ${deviceKey} (attempt ${attempt})`);
+      return;
+    } catch (err: any) {
+      if (attempt >= OPEN_MAX_ATTEMPTS) {
+        console.error('[keyboard.ipc] Could not open keyboard after retries:', err?.message);
+        return;
+      }
+      // Device likely still re-enumerating after the driver swap; wait & retry.
+      await delay(OPEN_RETRY_INTERVAL_MS);
+    }
   }
 }
 
-// ─── Macro key set (populated from renderer when macros change) ───────────────
-// Keys in this set will execute macro; keys NOT in set will be suppressed
-// when the macro device is selected
-
-const assignedKeyCodes = new Set<string>(); // e.g. 'KeyA', 'F1', 'Space'
-
-// ─── Interception listener ────────────────────────────────────────────────────
-//
-// API (from source):
-//   ic.wait() → Promise<Device | null>
-//   device.receive() → stroke
-//   device.send(stroke)   ← pass through (keyboard works normally)
-//   NOT calling send()    ← suppress (keystroke is consumed)
-
-function startListener(): void {
-  if (listenerActive) return;
-
-  let Interception: any, FilterKeyState: any;
-  try {
-    const mod = require('node-interception');
-    Interception = mod.Interception;
-    FilterKeyState = mod.FilterKeyState;
-  } catch (err: any) {
-    console.error('[keyboard.ipc] node-interception not available:', err.message);
-    return;
-  }
-
-  try {
-    ic = new Interception();
-    ic.setFilter('keyboard', FilterKeyState.ALL);
-    listenerActive = true;
-    console.log('[keyboard.ipc] Interception listener started');
-  } catch (err: any) {
-    console.error('[keyboard.ipc] Interception init failed:', err.message);
-    return;
-  }
-
-  function loop() {
-    if (!listenerActive || !ic) return;
-
-    ic.wait()
-      .then((device: any) => {
-        if (!device) { loop(); return; }
-
-        const stroke = device.receive();
-        const deviceKey = `interception:${device.id}`;
-        const isMacroDevice = selectedDeviceKey !== '' && deviceKey === selectedDeviceKey;
-
-        if (!isMacroDevice) {
-          // Not the macro device → always pass through normally
-          device.send(stroke);
-          loop();
-          return;
-        }
-
-        // ── This IS the macro device ──────────────────────────────────────────
-        const code = strokeToCode(stroke);
-        const isUp = strokeIsUp(stroke);
-
-        if (assignedKeyCodes.has(code)) {
-          // Key has a macro assigned → suppress keystroke, emit event to renderer
-          // Do NOT call device.send(stroke) → keystroke is consumed
-          if (mainWindowRef && !mainWindowRef.isDestroyed()) {
-            mainWindowRef.webContents.send('keyboard:event', {
-              code,
-              keycode: stroke.code ?? 0,
-              state: isUp ? 'up' : 'down',
-              deviceId: deviceKey,
-              isMacroDevice: true,
-            } as KeyEvent & { isMacroDevice: boolean });
-          }
-        } else {
-          // Key has NO macro → suppress (don't send, don't emit)
-          // The key does nothing — it's a dedicated macro keyboard
-        }
-
-        loop();
-      })
-      .catch((err: any) => {
-        if (listenerActive) {
-          console.error('[keyboard.ipc] wait error:', err.message?.slice(0, 80));
-          setTimeout(loop, 500);
-        }
-      });
-  }
-
-  loop();
+// Starts reading a device. Idempotent for the SAME device that is already being
+// read (the startup double-select case) unless force=true — used after a driver
+// swap, where the handle changed and a fresh open is required even for the same id.
+function startReader(deviceKey: string, force = false): void {
+  if (!force && deviceKey && deviceKey === activeDeviceKey && reader) return;
+  readerGeneration++; // supersede any in-flight open / scheduled self-heal
+  activeDeviceKey = deviceKey;
+  const generation = readerGeneration;
+  void serialize(() => openReader(deviceKey, generation));
 }
 
-function stopListener(): void {
-  listenerActive = false;
-  try { ic?.destroy(); } catch {}
-  ic = null;
+// Stops reading and WAITS for the handle to be released (used before a driver
+// swap / device teardown so Windows can re-enumerate without a physical replug).
+async function stopReader(): Promise<void> {
+  readerGeneration++; // cancel any in-flight open / scheduled self-heal
+  activeDeviceKey = null;
+  await serialize(() => teardownReader());
 }
-
-// ─── IPC ─────────────────────────────────────────────────────────────────────
 
 export function registerKeyboardIpc(mainWindow: BrowserWindow | null): void {
   mainWindowRef = mainWindow;
 
+  // Reading uses libusb's default backend — no global backend switch. A
+  // dedicated keyboard is already bound to WinUSB, so node-usb opens it directly.
+  console.log('[keyboard.ipc] WinUSB driver tool available:', isDriverToolAvailable());
+
   ipcMain.handle('keyboard:list', async () => {
-    const devices = getKeyboards();
-    if (devices.length > 0) return devices;
-    return [{
-      id: 'all', name: 'All Keyboards',
-      vendorId: 0, productId: 0,
-      isSelected: selectedDeviceKey === 'all', isConnected: true,
-    }];
+    devices = await listUsbKeyboards(selectedDeviceKey);
+    return devices;
   });
 
-  ipcMain.handle('keyboard:select', (_e, deviceId: string) => {
+  ipcMain.handle('keyboard:select', async (_e, deviceId: string) => {
     selectedDeviceKey = deviceId;
-    console.log('[keyboard.ipc] Selected:', deviceId);
+    devices = devices.map(device => ({
+      ...device,
+      isSelected: device.id === selectedDeviceKey,
+    }));
+    // Fire-and-forget: the open-retry loop runs in the background so the IPC call
+    // returns immediately instead of blocking up to ~15s while the device settles.
+    // Idempotent: a repeated select for the device already being read is a no-op,
+    // so the startup double-select can't open two colliding readers.
+    startReader(deviceId);
+    console.log('[keyboard.ipc] Selected device:', deviceId);
     return true;
   });
 
-  // Called by renderer whenever macros change
   ipcMain.handle('keyboard:updateMacroKeys', (_e, keyCodes: string[]) => {
     assignedKeyCodes.clear();
     keyCodes.forEach(k => assignedKeyCodes.add(k));
@@ -324,7 +182,51 @@ export function registerKeyboardIpc(mainWindow: BrowserWindow | null): void {
     return true;
   });
 
-  startListener();
+  ipcMain.handle('keyboard:driverStatus', () => ({ available: isDriverToolAvailable() }));
+
+  // Swap the selected keyboard to WinUSB via wdi-simple (libwdi). Runs elevated
+  // (UAC). Windows re-enumerates the device; once bound it stops typing into
+  // Windows and MacroDeck reads it directly. Start the reader on success.
+  ipcMain.handle('keyboard:dedicate', async (_e, deviceId: string) => {
+    const ids = parseDeviceKey(deviceId);
+    if (!ids) return { ok: false, error: 'invalid device id' };
+    if (!isDriverToolAvailable()) return { ok: false, error: 'WinUSB driver tool is not available' };
+
+    const result = await dedicate(ids.vendorId, ids.productId);
+    if (result.ok) {
+      console.log('[keyboard.ipc] Dedicated (WinUSB) device:', deviceId);
+      // Fire-and-forget: startReader retries opening while Windows finishes
+      // re-enumerating the just-swapped device (returns immediately). force=true
+      // because the handle changed — even if this device was already "active",
+      // the old reader points at the pre-swap enumeration and must be replaced.
+      startReader(deviceId, true);
+    } else {
+      console.error('[keyboard.ipc] Dedicate failed:', result.error, 'exit', result.exitCode);
+      if (result.log) console.error('[keyboard.ipc] wdi-simple log:\n' + result.log);
+    }
+    return result;
+  });
+
+  // Remove the WinUSB driver package and rescan so Windows reinstalls the in-box
+  // HID driver. Runs elevated (UAC).
+  ipcMain.handle('keyboard:undedicate', async (_e, deviceId: string) => {
+    const ids = parseDeviceKey(deviceId);
+    if (!ids) return { ok: false, error: 'invalid device id' };
+    // Releasing uses pnputil (a built-in Windows command), so it must work even
+    // when the wdi-simple dedicate tool is missing — no driver-tool gate here.
+
+    // Wait for the WinUSB handle to be fully released before restoring, otherwise
+    // Windows can't tear the device down and the user must physically replug it.
+    await stopReader();
+    const result = await restore(ids.vendorId, ids.productId);
+    if (result.ok) {
+      console.log('[keyboard.ipc] Un-dedicated (restored HID) device:', deviceId);
+    } else {
+      console.error('[keyboard.ipc] Un-dedicate failed:', result.error, 'exit', result.exitCode);
+      if (result.log) console.error('[keyboard.ipc] pnputil log:\n' + result.log);
+    }
+    return result;
+  });
 }
 
 export { selectedDeviceKey as selectedDeviceHandle };

@@ -3,10 +3,13 @@
  * Source is embedded as a string to avoid __dirname path issues.
  */
 
-import { execFileSync } from 'child_process';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+
+const execFileAsync = promisify(execFile);
 
 const tmpDir = path.join(os.tmpdir(), 'macrodeck');
 const exePath = path.join(tmpDir, 'AppVolume.exe');
@@ -162,11 +165,11 @@ class AppVolume {
             if (target == "master") {
                 switch (cmd) {
                     case "get-volume": Console.WriteLine((int)Math.Round(GetMasterVol())); break;
-                    case "set-volume": SetMasterVol(float.Parse(args[2])); Console.WriteLine("OK"); break;
-                    case "volume-up": SetMasterVol(Math.Min(100f, GetMasterVol() + (args.Length>2?float.Parse(args[2]):10f))); Console.WriteLine("OK"); break;
-                    case "volume-down": SetMasterVol(Math.Max(0f, GetMasterVol() - (args.Length>2?float.Parse(args[2]):10f))); Console.WriteLine("OK"); break;
+                    case "set-volume": { float prev=(float)Math.Round(GetMasterVol()); float nv=float.Parse(args[2]); SetMasterVol(nv); Console.WriteLine("{\\"ok\\":true,\\"previousValue\\":" + (int)prev + ",\\"currentValue\\":" + (int)Math.Round(Math.Max(0f,Math.Min(100f,nv))) + "}"); break; }
+                    case "volume-up": { float prev=(float)Math.Round(GetMasterVol()); float delta=args.Length>2?float.Parse(args[2]):10f; float nv=Math.Min(100f,prev+delta); SetMasterVol(nv); Console.WriteLine("{\\"ok\\":true,\\"previousValue\\":" + (int)prev + ",\\"currentValue\\":" + (int)Math.Round(nv) + "}"); break; }
+                    case "volume-down": { float prev=(float)Math.Round(GetMasterVol()); float delta=args.Length>2?float.Parse(args[2]):10f; float nv=Math.Max(0f,prev-delta); SetMasterVol(nv); Console.WriteLine("{\\"ok\\":true,\\"previousValue\\":" + (int)prev + ",\\"currentValue\\":" + (int)Math.Round(nv) + "}"); break; }
                     case "get-mute": Console.WriteLine(GetMasterMute().ToString().ToLower()); break;
-                    case "toggle-mute": SetMasterMute(!GetMasterMute()); Console.WriteLine("OK"); break;
+                    case "toggle-mute": { bool wasMuted=GetMasterMute(); SetMasterMute(!wasMuted); float vol=(float)Math.Round(GetMasterVol()); Console.WriteLine("{\\"ok\\":true,\\"isMuted\\":" + (!wasMuted).ToString().ToLower() + ",\\"volume\\":" + (int)vol + "}"); break; }
                     case "set-mute": SetMasterMute(args[2].ToLower()=="true"); Console.WriteLine("OK"); break;
                 }
             } else {
@@ -174,11 +177,11 @@ class AppVolume {
                 if (savs.Count == 0) { Console.Error.WriteLine("No session: " + target); Environment.Exit(1); }
                 switch (cmd) {
                     case "get-volume": Console.WriteLine((int)Math.Round(SAVGetVol(savs[0])*100)); break;
-                    case "set-volume": float sv=float.Parse(args[2])/100f; foreach(var p in savs) SAVSetVol(p,sv); Console.WriteLine("OK"); break;
-                    case "volume-up": float d=args.Length>2?float.Parse(args[2]):10f; float c=SAVGetVol(savs[0]); foreach(var p in savs) SAVSetVol(p,Math.Min(1f,c+d/100f)); Console.WriteLine("OK"); break;
-                    case "volume-down": float dd=args.Length>2?float.Parse(args[2]):10f; float dc=SAVGetVol(savs[0]); foreach(var p in savs) SAVSetVol(p,Math.Max(0f,dc-dd/100f)); Console.WriteLine("OK"); break;
+                    case "set-volume": { float prev=(float)Math.Round(SAVGetVol(savs[0])*100); float sv=float.Parse(args[2])/100f; foreach(var p in savs) SAVSetVol(p,sv); Console.WriteLine("{\\"ok\\":true,\\"previousValue\\":" + (int)prev + ",\\"currentValue\\":" + (int)Math.Round(float.Parse(args[2])) + "}"); break; }
+                    case "volume-up": { float d=args.Length>2?float.Parse(args[2]):10f; float c=SAVGetVol(savs[0])*100f; float nv=Math.Min(100f,c+d); foreach(var p in savs) SAVSetVol(p,nv/100f); Console.WriteLine("{\\"ok\\":true,\\"previousValue\\":" + (int)Math.Round(c) + ",\\"currentValue\\":" + (int)Math.Round(nv) + "}"); break; }
+                    case "volume-down": { float dd=args.Length>2?float.Parse(args[2]):10f; float dc=SAVGetVol(savs[0])*100f; float nv=Math.Max(0f,dc-dd); foreach(var p in savs) SAVSetVol(p,nv/100f); Console.WriteLine("{\\"ok\\":true,\\"previousValue\\":" + (int)Math.Round(dc) + ",\\"currentValue\\":" + (int)Math.Round(nv) + "}"); break; }
                     case "get-mute": Console.WriteLine(SAVGetMute(savs[0]).ToString().ToLower()); break;
-                    case "toggle-mute": bool tm=SAVGetMute(savs[0]); foreach(var p in savs) SAVSetMute(p,!tm); Console.WriteLine("OK"); break;
+                    case "toggle-mute": { bool tm=SAVGetMute(savs[0]); float vol=(float)Math.Round(SAVGetVol(savs[0])*100); foreach(var p in savs) SAVSetMute(p,!tm); Console.WriteLine("{\\"ok\\":true,\\"isMuted\\":" + (!tm).ToString().ToLower() + ",\\"volume\\":" + (int)vol + "}"); break; }
                     case "set-mute": bool sm=args[2].ToLower()=="true"; foreach(var p in savs) SAVSetMute(p,sm); Console.WriteLine("OK"); break;
                 }
                 foreach(var p in savs) Rel(p);
@@ -191,34 +194,37 @@ class AppVolume {
 
 let compiled = false;
 
-export function ensureAppVolumeExe(): string {
-  if (compiled && fs.existsSync(exePath)) return exePath;
+export async function ensureAppVolumeExe(): Promise<string> {
+    if (compiled && fs.existsSync(exePath)) return exePath;
 
-  if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
 
-  // Write embedded source to temp file
-  fs.writeFileSync(srcPath, APP_VOLUME_CS, 'utf8');
+    // Write embedded source to temp file
+    fs.writeFileSync(srcPath, APP_VOLUME_CS, 'utf8');
 
-  // Find csc.exe
-  const cscPaths = [
-    'C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe',
-    'C:\\Windows\\Microsoft.NET\\Framework\\v4.0.30319\\csc.exe',
-  ];
-  const csc = cscPaths.find(p => fs.existsSync(p));
-  if (!csc) throw new Error('csc.exe not found — .NET Framework 4.x required');
+    // Find csc.exe
+    const cscPaths = [
+        'C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe',
+        'C:\\Windows\\Microsoft.NET\\Framework\\v4.0.30319\\csc.exe',
+    ];
+    const csc = cscPaths.find(p => fs.existsSync(p));
+    if (!csc) throw new Error('csc.exe not found — .NET Framework 4.x required');
 
-  // Delete stale exe
-  if (fs.existsSync(exePath)) fs.unlinkSync(exePath);
+    // Delete stale exe
+    if (fs.existsSync(exePath)) fs.unlinkSync(exePath);
 
-  execFileSync(csc, ['/nologo', `/out:${exePath}`, '/r:System.dll', srcPath],
-    { timeout: 30000, stdio: 'pipe' });
+    // Async so the Electron main thread (which also drives libusb keyboard
+    // polling) is never blocked while csc compiles.
+    await execFileAsync(csc, ['/nologo', `/out:${exePath}`, '/r:System.dll', srcPath],
+        { timeout: 30000 });
 
-  compiled = true;
-  console.log('[appvolume] Compiled AppVolume.exe');
-  return exePath;
+    compiled = true;
+    console.log('[appvolume] Compiled AppVolume.exe');
+    return exePath;
 }
 
-export function runAppVolume(args: string[]): string {
-  const exe = ensureAppVolumeExe();
-  return execFileSync(exe, args, { timeout: 5000 }).toString().trim();
+export async function runAppVolume(args: string[]): Promise<string> {
+    const exe = await ensureAppVolumeExe();
+    const { stdout } = await execFileAsync(exe, args, { timeout: 5000 });
+    return stdout.toString().trim();
 }

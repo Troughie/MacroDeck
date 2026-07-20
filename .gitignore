@@ -4,3 +4,12 @@ release/
 .env
 *.log
 *.tsbuildinfo
+
+# C# / native helper build output. Source (.cs/.csproj) is tracked; compiled
+# binaries are not — EXCEPT resources/wdi-simple.exe, which is committed on purpose
+# (force-added) so the WinUSB Dedicate/Release flow works out of the box.
+resources/bin/
+resources/obj/
+resources/*.exe
+# libwdi driver-extraction output created at runtime
+resources/usb_driver/

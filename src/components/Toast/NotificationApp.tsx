@@ -13,16 +13,90 @@ interface NotifData {
   message?: string;
   icon?: string;
   duration?: number;
+  currentValue?: number;   // giá trị hiện tại (sau hành động)
+  previousValue?: number;  // giá trị trước đó
+  unit?: string;           // '%', 'dB', v.v. — mặc định '%'
+  maxValue?: number;       // giá trị tối đa để tính thanh — mặc định 100
 }
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 const TYPE_CONFIG = {
-  success: { accent: '#22c55e', border: 'rgba(34,197,94,0.3)',  icon: <CheckCircle2 size={16} style={{ color: '#22c55e' }} /> },
-  error:   { accent: '#ef4444', border: 'rgba(239,68,68,0.3)',  icon: <AlertCircle  size={16} style={{ color: '#ef4444' }} /> },
-  info:    { accent: '#3b82f6', border: 'rgba(59,130,246,0.3)', icon: <Info         size={16} style={{ color: '#60a5fa' }} /> },
-  loading: { accent: '#3b82f6', border: 'rgba(59,130,246,0.3)', icon: <Loader2      size={16} style={{ color: '#60a5fa' }} className="animate-spin" /> },
+  success: { accent: '#22c55e', border: 'rgba(34,197,94,0.3)', icon: <CheckCircle2 size={16} style={{ color: '#22c55e' }} /> },
+  error: { accent: '#ef4444', border: 'rgba(239,68,68,0.3)', icon: <AlertCircle size={16} style={{ color: '#ef4444' }} /> },
+  info: { accent: '#3b82f6', border: 'rgba(59,130,246,0.3)', icon: <Info size={16} style={{ color: '#60a5fa' }} /> },
+  loading: { accent: '#3b82f6', border: 'rgba(59,130,246,0.3)', icon: <Loader2 size={16} style={{ color: '#60a5fa' }} className="animate-spin" /> },
 };
+
+// ─── Value bar (thanh giá trị hiện tại) ──────────────────────────────────────
+
+function ValueBar({ notif, accent }: { notif: NotifData; accent: string }) {
+  const { currentValue, previousValue, unit = '%', maxValue = 100 } = notif;
+  if (currentValue === undefined) return null;
+
+  const pct = Math.round((currentValue / maxValue) * 100);
+  const isMuted = currentValue === 0;
+  const delta = previousValue !== undefined ? currentValue - previousValue : undefined;
+  const isUp = delta !== undefined && delta > 0;
+  const isDown = delta !== undefined && delta < 0;
+
+  const barColor = isMuted ? '#64748b' : accent;
+  const deltaColor = isUp ? '#4ade80' : isDown ? '#f87171' : '#94a3b8';
+  const deltaLabel = delta === undefined
+    ? null
+    : isMuted
+      ? '🔇 muted'
+      : `${isUp ? '▲ +' : '▼ '}${delta}${unit}`;
+
+  return (
+    <div style={{ padding: '0 14px 8px 16px' }}>
+      {/* Current value + delta badge */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+        {previousValue !== undefined && (
+          <span style={{ fontSize: 10, color: '#64748b' }}>
+            Trước: {previousValue}{unit}
+          </span>
+        )}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+          {deltaLabel && (
+            <span style={{
+              fontSize: 10,
+              fontWeight: 600,
+              color: deltaColor,
+              background: isMuted
+                ? 'rgba(100,116,139,0.15)'
+                : isUp
+                  ? 'rgba(34,197,94,0.12)'
+                  : 'rgba(239,68,68,0.12)',
+              padding: '1px 6px',
+              borderRadius: 6,
+            }}>
+              {deltaLabel}
+            </span>
+          )}
+          <span style={{ fontSize: 13, fontWeight: 700, color: isMuted ? '#64748b' : accent }}>
+            {currentValue}{unit}
+          </span>
+        </div>
+      </div>
+
+      {/* Bar */}
+      <div style={{
+        height: 4,
+        background: 'rgba(255,255,255,0.1)',
+        borderRadius: 3,
+        overflow: 'hidden',
+      }}>
+        <motion.div
+          initial={{ width: `${Math.round(((previousValue ?? currentValue) / maxValue) * 100)}%` }}
+          animate={{ width: `${pct}%` }}
+          transition={{ duration: 0.4, ease: 'easeOut' }}
+          style={{ height: '100%', background: barColor, borderRadius: 3 }}
+        />
+      </div>
+    </div>
+  );
+}
 
 // ─── Single notification ──────────────────────────────────────────────────────
 
@@ -32,6 +106,7 @@ function NotifItem({ notif, onDismiss }: { notif: NotifData; onDismiss: (id: str
   const [hovered, setHovered] = useState(false);
 
   const isCustomIcon = notif.icon && (notif.icon.startsWith('data:') || notif.icon.startsWith('http'));
+  const hasValueBar = notif.currentValue !== undefined;
 
   useEffect(() => {
     if (!notif.duration || notif.duration === 0) return;
@@ -50,15 +125,12 @@ function NotifItem({ notif, onDismiss }: { notif: NotifData; onDismiss: (id: str
     return () => cancelAnimationFrame(raf);
   }, [notif.duration, notif.id, hovered, onDismiss]);
 
-  // Tell main process to enable mouse events when hovered
   const handleMouseEnter = () => {
     setHovered(true);
-    // Enable mouse events on notification window (no forward to other windows)
     (window as any).electronAPI?._ipc?.send?.('notif:set-interactive', true);
   };
   const handleMouseLeave = () => {
     setHovered(false);
-    // Back to click-through
     (window as any).electronAPI?._ipc?.send?.('notif:set-interactive', false);
   };
 
@@ -127,9 +199,18 @@ function NotifItem({ notif, onDismiss }: { notif: NotifData; onDismiss: (id: str
         )}
       </div>
 
-      {/* Progress bar */}
+      {/* Value bar — hiện khi có currentValue */}
+      {hasValueBar && <ValueBar notif={notif} accent={cfg.accent} />}
+
+      {/* Progress bar (countdown) */}
       {notif.duration && notif.duration > 0 && (
-        <div style={{ height: 2, margin: '0 14px 8px', background: 'rgba(255,255,255,0.08)', borderRadius: 2, overflow: 'hidden' }}>
+        <div style={{
+          height: 2,
+          margin: hasValueBar ? '0 14px 6px' : '0 14px 8px',
+          background: 'rgba(255,255,255,0.08)',
+          borderRadius: 2,
+          overflow: 'hidden',
+        }}>
           <div style={{
             height: '100%', background: cfg.accent, borderRadius: 2,
             width: `${progress}%`, transition: 'width 0.016s linear',
@@ -152,7 +233,6 @@ export function NotificationApp() {
   useEffect(() => {
     if (!window.electronAPI) return;
 
-    // Listen for notifications from main process
     const ipc = (window as any).electronAPI;
 
     const unsubShow = ipc.notif?.onShow?.((data: NotifData) => {
@@ -170,7 +250,6 @@ export function NotificationApp() {
     const unsubUpdate = ipc.notif?.onUpdate?.((data: { id: string } & Partial<NotifData>) => {
       const { id, ...updates } = data;
       setNotifs(prev => prev.map(n => n.id === id ? { ...n, ...updates } : n));
-      // Auto-dismiss after duration if type changed from loading
       if (updates.type && updates.type !== 'loading' && updates.duration) {
         setTimeout(() => dismiss(id), updates.duration);
       }

@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body {
+      font-family: -apple-system, "Segoe UI", sans-serif;
+      background: #1e1e1e; color: #ddd; margin: 0; padding: 12px;
+      font-size: 12px; user-select: none;
+    }
+    h1 { font-size: 13px; margin: 0 0 8px; color: #fff; }
+    #status { color: #6bcf63; }
+    #last { color: #888; margin-top: 4px; font-size: 11px; }
+    #scripts {
+      margin-top: 10px; max-height: 320px; overflow-y: auto;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    #scripts button, #expressions button {
+      display: block; width: 100%; text-align: left; cursor: pointer;
+      background: #2a2a2a; color: #ddd; border: 1px solid #3a3a3a;
+      border-radius: 4px; padding: 6px 8px; font-size: 12px;
+    }
+    #scripts button:hover, #expressions button:hover { background: #333; border-color: #4a4a4a; }
+    #scripts button:active, #expressions button:active { background: #3a3a3a; }
+    #expressions {
+      max-height: 240px; overflow-y: auto;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    #exprEmpty { color: #777; font-size: 11px; margin-top: 6px; }
+    #empty { color: #777; font-size: 11px; margin-top: 10px; }
+    #runResult { margin-top: 8px; font-size: 11px; min-height: 14px; }
+  </style>
+</head>
+<body>
+  <h1>MacroDeck</h1>
+  <div id="status">Starting…</div>
+  <div id="last"></div>
+  <div id="scripts"></div>
+  <div id="empty"></div>
+  <div id="expressionsLabel" style="display:none; margin-top:12px; color:#888; font-size:11px;">Expressions</div>
+  <div id="expressions"></div>
+  <div id="exprEmpty"></div>
+  <div id="runResult"></div>
+  <script src="./js/CSInterface.js"></script>
+  <script src="./js/main.js"></script>
+</body>
+</html>

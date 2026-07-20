@@ -6,6 +6,8 @@ import type {
   InstalledApp,
   AudioSession,
   KeyboardDevice,
+  AeSavedScript,
+  AeSavedExpression,
 } from '../src/types/macro.types';
 
 // ─── Type-safe IPC Bridge ─────────────────────────────────────────────────────
@@ -19,10 +21,24 @@ const electronAPI = {
       ipcRenderer.invoke('keyboard:select', deviceId),
     updateMacroKeys: (keyCodes: string[]): Promise<boolean> =>
       ipcRenderer.invoke('keyboard:updateMacroKeys', keyCodes),
+    driverStatus: (): Promise<{ available: boolean }> =>
+      ipcRenderer.invoke('keyboard:driverStatus'),
+    dedicate: (deviceId: string): Promise<{ ok: boolean; exitCode?: number | null; error?: string; log?: string }> =>
+      ipcRenderer.invoke('keyboard:dedicate', deviceId),
+    undedicate: (deviceId: string): Promise<{ ok: boolean; exitCode?: number | null; error?: string; log?: string }> =>
+      ipcRenderer.invoke('keyboard:undedicate', deviceId),
     onKeyEvent: (callback: (event: KeyEvent) => void) => {
       const handler = (_: Electron.IpcRendererEvent, event: KeyEvent) => callback(event);
       ipcRenderer.on('keyboard:event', handler);
       return () => ipcRenderer.removeListener('keyboard:event', handler);
+    },
+    // Fired when the main-process reader is torn down / replaced, so the renderer
+    // can clear any keys it still thinks are held (their key-up was lost with the
+    // old reader). Prevents a stuck-highlighted key on the visualizer.
+    onFlush: (callback: () => void) => {
+      const handler = () => callback();
+      ipcRenderer.on('keyboard:flush', handler);
+      return () => ipcRenderer.removeListener('keyboard:flush', handler);
     },
   },
 
@@ -50,6 +66,20 @@ const electronAPI = {
       ipcRenderer.invoke('macro:execute', macro),
   },
 
+  // ── After Effects ──────────────────────────────────────────────────────────
+  ae: {
+    detect: (): Promise<{ found: boolean; path: string | null }> =>
+      ipcRenderer.invoke('ae:detect'),
+    execute: (jsx: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('ae:execute', jsx),
+    install: (): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('ae:install'),
+    uninstall: (): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('ae:uninstall'),
+    panelStatus: (): Promise<{ installed: boolean; alive: boolean; aeVersion?: string }> =>
+      ipcRenderer.invoke('ae:panel-status'),
+  },
+
   // ── Store ─────────────────────────────────────────────────────────────────
   store: {
     saveMacros: (macros: Record<string, MacroConfig>): Promise<boolean> =>
@@ -64,6 +94,14 @@ const electronAPI = {
       ipcRenderer.invoke('store:saveDevice', deviceId),
     loadDevice: (): Promise<string> =>
       ipcRenderer.invoke('store:loadDevice'),
+    saveAeScripts: (scripts: AeSavedScript[]): Promise<boolean> =>
+      ipcRenderer.invoke('store:saveAeScripts', scripts),
+    loadAeScripts: (): Promise<AeSavedScript[]> =>
+      ipcRenderer.invoke('store:loadAeScripts'),
+    saveAeExpressions: (expressions: AeSavedExpression[]): Promise<boolean> =>
+      ipcRenderer.invoke('store:saveAeExpressions', expressions),
+    loadAeExpressions: (): Promise<AeSavedExpression[]> =>
+      ipcRenderer.invoke('store:loadAeExpressions'),
   },
 
   // ── System ────────────────────────────────────────────────────────────────
@@ -72,12 +110,18 @@ const electronAPI = {
       ipcRenderer.invoke('system:setStartup', enabled),
     getStartup: (): Promise<boolean> =>
       ipcRenderer.invoke('system:getStartup'),
-    uninstallInterception: (): Promise<boolean> =>
-      ipcRenderer.invoke('system:uninstallInterception'),
     hideWindow: (): Promise<void> =>
       ipcRenderer.invoke('system:hideWindow'),
     showWindow: (): Promise<void> =>
       ipcRenderer.invoke('system:showWindow'),
+  },
+
+  // ── Backup (export / import full config) ──────────────────────────────────
+  backup: {
+    export: (): Promise<{ ok: boolean; canceled?: boolean; filePath?: string; error?: string }> =>
+      ipcRenderer.invoke('settings:export'),
+    import: (): Promise<{ ok: boolean; canceled?: boolean; error?: string }> =>
+      ipcRenderer.invoke('settings:import'),
   },
 
   // ── Profile ───────────────────────────────────────────────────────────────
