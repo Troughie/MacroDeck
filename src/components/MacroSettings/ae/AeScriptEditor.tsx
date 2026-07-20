@@ -5,10 +5,10 @@ import { electronAPI } from '../../../lib/electron';
 import { useAeScriptStore } from '../../../stores/aeScriptStore';
 
 interface Props {
-  scriptType: 'preset' | 'custom';
+  scriptType: 'preset' | 'custom' | 'expression';
   presetId: string | undefined;
   customScript: string | undefined;
-  onScriptTypeChange: (type: 'preset' | 'custom') => void;
+  onScriptTypeChange: (type: 'preset' | 'custom' | 'expression') => void;
   onPresetChange: (presetId: string) => void;
   onCustomScriptChange: (script: string) => void;
 }

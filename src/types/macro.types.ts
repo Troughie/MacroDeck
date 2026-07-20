@@ -182,7 +182,7 @@ export interface StoreSchema {
   activeProfileId: string;
   settings: AppSettings;
   aeScripts: AeSavedScript[]; // reusable custom JSX library, shared across keys
-  aeExpressions?: AeSavedExpression[]; // reusable custom expression library
+  aeExpressions: AeSavedExpression[]; // reusable custom expression library
 }
 
 // A user-saved custom JSX script, reusable across any AE macro key.

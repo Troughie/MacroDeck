@@ -8,6 +8,7 @@ import { registerAudioIpc } from './ipc/audio.ipc';
 import { registerMacroIpc } from './ipc/macro.ipc';
 import { registerSystemIpc, setWindowsStartup } from './ipc/system.ipc';
 import { registerAeIpc } from './ipc/ae.ipc';
+import { writeLibrary } from './ipc/ae-bridge';
 import { ensureAppVolumeExe } from './native/appvolume';
 import { createNotificationWindow, registerNotificationIpc } from './notification-window';
 import { installFileLogger } from './debug-log';
@@ -25,6 +26,7 @@ const store = new Store<StoreSchema>({
       theme: 'dark',
     },
     aeScripts: [],
+    aeExpressions: [],
   },
 });
 
@@ -152,6 +154,16 @@ function showWindow(): void {
   }
 }
 
+// Refresh the AE panel's library.json. Wrapped so a write failure (e.g. the
+// bridge dir can't be created) is logged but never crashes the caller.
+function syncAeLibrary(): void {
+  try {
+    writeLibrary(store.get('aeScripts', []));
+  } catch (e) {
+    console.error('[main] writeLibrary failed:', e);
+  }
+}
+
 function registerStoreIpc(): void {
   ipcMain.handle('store:saveMacros', (_event, macros) => {
     store.set('macros', macros);
@@ -183,6 +195,7 @@ function registerStoreIpc(): void {
 
   ipcMain.handle('store:saveAeScripts', (_event, scripts) => {
     store.set('aeScripts', scripts);
+    syncAeLibrary();
     return true;
   });
 
@@ -236,6 +249,10 @@ app.whenReady().then(() => {
   registerSystemIpc(store, mainWindow, updateTrayMenu);
   registerAeIpc();
   registerNotificationIpc();
+
+  // Seed the AE panel's library.json so it has data even if the user changes
+  // nothing this session (the panel reads the last-written file).
+  syncAeLibrary();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
