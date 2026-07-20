@@ -154,7 +154,7 @@ if (!comp || !(comp instanceof CompItem)) {
     id: 'layer.shapesFromText',
     label: 'Create Shapes from Text',
     category: 'layer',
-    description: 'Converts every selected text layer to shapes at once (AE only allows one at a time by hand)',
+    description: 'Converts every selected text layer to shapes at once, and for decomposed single-character layers keeps only that character (drops the leftover glyphs AE outlines from the full source string)',
     jsx: `var comp = app.project.activeItem;
 if (!comp || !(comp instanceof CompItem)) {
   throw new Error("Open a composition first.");
@@ -181,8 +181,37 @@ if (!comp || !(comp instanceof CompItem)) {
     throw new Error("This After Effects version doesn't expose 'Create Shapes from Text'.");
   }
 
+  // Keep only the glyph group matching the layer name. Decompose-text tools
+  // leave the FULL source string ("Bouncy") on every one-character layer and
+  // just reveal a single glyph with a range selector; "Create Shapes from
+  // Text" ignores that selector and outlines the whole string, so a layer
+  // named "y" ends up with all of B/o/u/n/c/y as groups. Each group is named
+  // after its character, so we drop every group whose name isn't the target.
+  // Guarded by an exact name match, so normal multi-character text layers
+  // (no group named like the whole layer) are left completely untouched.
+  function pruneToGlyph(shapeLayer, target) {
+    var contents = shapeLayer.property("ADBE Root Vectors Group");
+    if (!contents) contents = shapeLayer.property("Contents");
+    if (!contents || contents.numProperties === 0) return;
+
+    var hasMatch = false;
+    for (var g = 1; g <= contents.numProperties; g++) {
+      if (contents.property(g).name === target) { hasMatch = true; break; }
+    }
+    if (!hasMatch) return; // not a decomposed single-glyph layer — leave as is
+
+    for (var d = contents.numProperties; d >= 1; d--) {
+      var group = contents.property(d);
+      if (group.name !== target && group.canSetEnabled !== false) {
+        try { group.remove(); } catch (e) { /* not removable — skip */ }
+      }
+    }
+  }
+
   app.beginUndoGroup("Create Shapes from Text (batch)");
   for (var k = 0; k < textLayers.length; k++) {
+    var target = String(textLayers[k].name).replace(/^\\s+|\\s+$/g, "");
+
     // Isolate this text layer as the ONLY selection (also clears any shape
     // layers the previous iteration created and left selected).
     for (var m = 1; m <= comp.numLayers; m++) {
@@ -190,6 +219,15 @@ if (!comp || !(comp instanceof CompItem)) {
     }
     textLayers[k].selected = true;
     app.executeCommand(cmdId);
+
+    // AE selects the freshly created "<name> Outlines" shape layer. Find it and
+    // strip the leftover glyphs down to the one this layer represents.
+    var created = comp.selectedLayers;
+    for (var s = 0; s < created.length; s++) {
+      if (created[s].property("ADBE Root Vectors Group")) {
+        pruneToGlyph(created[s], target);
+      }
+    }
   }
   app.endUndoGroup();
 }`,
