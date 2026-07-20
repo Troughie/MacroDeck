@@ -150,6 +150,50 @@ if (!comp || !(comp instanceof CompItem)) {
   app.endUndoGroup();
 }`,
   },
+  {
+    id: 'layer.shapesFromText',
+    label: 'Create Shapes from Text',
+    category: 'layer',
+    description: 'Converts every selected text layer to shapes at once (AE only allows one at a time by hand)',
+    jsx: `var comp = app.project.activeItem;
+if (!comp || !(comp instanceof CompItem)) {
+  throw new Error("Open a composition first.");
+} else {
+  // Snapshot the selected TEXT layers up front — the selection changes as we
+  // run the command per layer, so we can't rely on comp.selectedLayers mid-loop.
+  var sel = comp.selectedLayers;
+  var textLayers = [];
+  for (var i = 0; i < sel.length; i++) {
+    if (sel[i] instanceof TextLayer) {
+      textLayers.push(sel[i]);
+    }
+  }
+
+  if (textLayers.length === 0) {
+    throw new Error("Select one or more TEXT layers first.");
+  }
+
+  // AE's "Create Shapes from Text" is greyed out when several layers are
+  // selected, so we drive it one layer at a time. This mirrors doing it by
+  // hand for each layer, but in a single click.
+  var cmdId = app.findMenuCommandId("Create Shapes from Text");
+  if (!cmdId) {
+    throw new Error("This After Effects version doesn't expose 'Create Shapes from Text'.");
+  }
+
+  app.beginUndoGroup("Create Shapes from Text (batch)");
+  for (var k = 0; k < textLayers.length; k++) {
+    // Isolate this text layer as the ONLY selection (also clears any shape
+    // layers the previous iteration created and left selected).
+    for (var m = 1; m <= comp.numLayers; m++) {
+      comp.layer(m).selected = false;
+    }
+    textLayers[k].selected = true;
+    app.executeCommand(cmdId);
+  }
+  app.endUndoGroup();
+}`,
+  },
 
   // ── Expressions ───────────────────────────────────────────────────────────
   {
