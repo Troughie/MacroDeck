@@ -27,9 +27,9 @@ export const AE_PRESETS: AePreset[] = [
     description: 'Centers the anchor point of each selected layer without moving it',
     jsx: `var comp = app.project.activeItem;
 if (!comp || !(comp instanceof CompItem)) {
-  alert("Open a composition first.");
+  throw new Error("Open a composition first.");
 } else if (comp.selectedLayers.length === 0) {
-  alert("Select one or more layers first.");
+  throw new Error("Select one or more layers first.");
 } else {
   app.beginUndoGroup("Center Anchor Point");
   // AE's built-in command centers the anchor within the layer's real content
@@ -123,9 +123,9 @@ if (comp && comp instanceof CompItem) {
     description: 'Scales selected layers to fill the composition (preserves aspect ratio)',
     jsx: `var comp = app.project.activeItem;
 if (!comp || !(comp instanceof CompItem)) {
-  alert("Open a composition first.");
+  throw new Error("Open a composition first.");
 } else if (comp.selectedLayers.length === 0) {
-  alert("Select one or more layers first.");
+  throw new Error("Select one or more layers first.");
 } else {
   app.beginUndoGroup("Fit Layer to Comp");
   var sel = comp.selectedLayers;
@@ -180,7 +180,7 @@ if (comp && comp instanceof CompItem) {
     props[0].expression = 'loopOut("cycle")';
     app.endUndoGroup();
   } else {
-    alert("Select a property in the timeline first.");
+    throw new Error("Select a property in the timeline first.");
   }
 }`,
   },
@@ -197,7 +197,7 @@ if (comp && comp instanceof CompItem) {
     props[0].expression = "time * 100";
     app.endUndoGroup();
   } else {
-    alert("Select a property in the timeline first.");
+    throw new Error("Select a property in the timeline first.");
   }
 }`,
   },
@@ -226,7 +226,7 @@ if (comp && comp instanceof CompItem) {
     ].join("\n");
     app.endUndoGroup();
   } else {
-    alert("Select a property in the timeline first.");
+    throw new Error("Select a property in the timeline first.");
   }
 }`,
   },
@@ -300,7 +300,7 @@ if (item && item instanceof CompItem) {
 if (cmd) {
   app.executeCommand(cmd);
 } else {
-  alert("Could not find 'Collect Files...' in the File menu.");
+  throw new Error("Could not find 'Collect Files...' in the File menu.");
 }`,
   },
   {
@@ -347,7 +347,7 @@ var FONT_SIZE = 120;  // initial text size
 
 var comp = app.project.activeItem;
 if (!comp || !(comp instanceof CompItem)) {
-  alert("Open a composition first.");
+  throw new Error("Open a composition first.");
 } else {
   app.beginUndoGroup("Counting Number");
 
@@ -428,21 +428,20 @@ var DURATION = 2;   // seconds for the 0% → 100% write-on
 
 var comp = app.project.activeItem;
 if (!comp || !(comp instanceof CompItem)) {
-  alert("Open a composition first.");
+  throw new Error("Open a composition first.");
 } else if (comp.selectedLayers.length === 0) {
-  alert("Select one or more shape layers first.");
+  throw new Error("Select one or more shape layers first.");
 } else {
   app.beginUndoGroup("Add Trim Paths");
 
   var applied = 0;
-  var skipped = 0;
   var sel = comp.selectedLayers;
 
   for (var i = 0; i < sel.length; i++) {
     var layer = sel[i];
     // Only shape layers have a "Contents" ("ADBE Root Vectors Group") property.
     var contents = layer.property("ADBE Root Vectors Group");
-    if (!contents) { skipped++; continue; }
+    if (!contents) { continue; }
 
     // "ADBE Vector Filter - Trim" is the Trim Paths shape effect. Adding it to
     // Contents trims every path in the layer at once (matches Add ▸ Trim Paths).
@@ -464,10 +463,7 @@ if (!comp || !(comp instanceof CompItem)) {
   app.endUndoGroup();
 
   if (applied === 0) {
-    alert("No shape layers selected — Trim Paths only applies to shape layers.");
-  } else if (skipped > 0) {
-    alert("Added Trim Paths to " + applied + " shape layer(s); skipped " +
-          skipped + " non-shape layer(s).");
+    throw new Error("No shape layers selected — Trim Paths only applies to shape layers.");
   }
 }`,
   },
