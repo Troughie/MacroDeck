@@ -7,6 +7,7 @@ import type {
   AudioSession,
   KeyboardDevice,
   AeSavedScript,
+  AeSavedExpression,
 } from '../src/types/macro.types';
 
 // ─── Type-safe IPC Bridge ─────────────────────────────────────────────────────
@@ -97,6 +98,10 @@ const electronAPI = {
       ipcRenderer.invoke('store:saveAeScripts', scripts),
     loadAeScripts: (): Promise<AeSavedScript[]> =>
       ipcRenderer.invoke('store:loadAeScripts'),
+    saveAeExpressions: (expressions: AeSavedExpression[]): Promise<boolean> =>
+      ipcRenderer.invoke('store:saveAeExpressions', expressions),
+    loadAeExpressions: (): Promise<AeSavedExpression[]> =>
+      ipcRenderer.invoke('store:loadAeExpressions'),
   },
 
   // ── System ────────────────────────────────────────────────────────────────
