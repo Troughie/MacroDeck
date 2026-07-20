@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Play, AlertCircle, Save, Trash2, FolderOpen, Zap } from 'lucide-react';
+import { Play, AlertCircle, Save, Trash2, FolderOpen, Zap, Pencil, X } from 'lucide-react';
 import { AE_PRESETS, AE_PRESET_CATEGORIES } from './aePresets';
 import { electronAPI } from '../../../lib/electron';
 import { useAeScriptStore } from '../../../stores/aeScriptStore';
@@ -39,12 +39,14 @@ export function AeScriptEditor({
     loaded: exprLoaded,
     load: loadExpr,
     addExpression,
+    updateExpression,
     removeExpression,
   } = useAeExpressionStore();
 
   const [exprText, setExprText] = useState('');
   const [exprName, setExprName] = useState('');
   const [exprTarget, setExprTarget] = useState<AeExprTarget>('selected');
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [exprTestStatus, setExprTestStatus] = useState<'idle' | 'running' | 'ok' | 'error'>('idle');
   const [exprTestError, setExprTestError] = useState('');
 
@@ -108,8 +110,30 @@ export function AeScriptEditor({
     const expr = exprText.trim();
     const name = exprName.trim();
     if (!expr || !name) return;
-    addExpression(name, expr, exprTarget);
+    if (editingId) {
+      updateExpression(editingId, { name, expression: expr, target: exprTarget });
+    } else {
+      addExpression(name, expr, exprTarget);
+    }
+    // Clear the editor back to a fresh "add" state.
+    setEditingId(null);
+    setExprText('');
     setExprName('');
+    setExprTarget('selected');
+  };
+
+  const startEditExpression = (e: { id: string; name: string; expression: string; target: AeExprTarget }) => {
+    setEditingId(e.id);
+    setExprText(e.expression);
+    setExprName(e.name);
+    setExprTarget(e.target);
+  };
+
+  const cancelEditExpression = () => {
+    setEditingId(null);
+    setExprText('');
+    setExprName('');
+    setExprTarget('selected');
   };
 
   const handleTestExpression = async () => {
@@ -336,14 +360,26 @@ export function AeScriptEditor({
               />
             </div>
 
-            <button
-              onClick={handleSaveExpression}
-              disabled={!exprText.trim() || !exprName.trim()}
-              className="btn-secondary text-xs py-1.5 w-full flex items-center justify-center gap-1.5 disabled:opacity-50"
-            >
-              <Save size={12} />
-              Save Expression
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleSaveExpression}
+                disabled={!exprText.trim() || !exprName.trim()}
+                className="btn-secondary text-xs py-1.5 flex-1 flex items-center justify-center gap-1.5 disabled:opacity-50"
+              >
+                <Save size={12} />
+                {editingId ? 'Update Expression' : 'Save Expression'}
+              </button>
+              {editingId && (
+                <button
+                  onClick={cancelEditExpression}
+                  className="btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1 flex-shrink-0"
+                  title="Cancel editing"
+                >
+                  <X size={12} />
+                  Cancel
+                </button>
+              )}
+            </div>
 
             {exprText.trim() && !exprName.trim() && (
               <p className="text-text-muted text-[11px] -mt-1">
@@ -372,12 +408,14 @@ export function AeScriptEditor({
                 {expressions.map(e => (
                   <div
                     key={e.id}
-                    className="flex items-center gap-2 px-3 py-2 text-xs border-b border-border last:border-b-0 hover:bg-bg-hover group"
+                    className={`flex items-center gap-2 px-3 py-2 text-xs border-b border-border last:border-b-0 hover:bg-bg-hover ${
+                      editingId === e.id ? 'bg-accent-blue/10' : ''
+                    }`}
                   >
                     <button
-                      onClick={() => { setExprText(e.expression); setExprTarget(e.target); }}
+                      onClick={() => startEditExpression(e)}
                       className="flex-1 text-left text-text-primary truncate"
-                      title="Load this expression into the editor"
+                      title="Edit this expression"
                     >
                       {e.name}
                     </button>
@@ -385,8 +423,18 @@ export function AeScriptEditor({
                       {e.target}
                     </span>
                     <button
-                      onClick={() => removeExpression(e.id)}
-                      className="text-text-muted hover:text-red-400 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={() => startEditExpression(e)}
+                      className="text-text-muted hover:text-accent-blue flex-shrink-0"
+                      title="Edit expression"
+                    >
+                      <Pencil size={12} />
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (editingId === e.id) cancelEditExpression();
+                        removeExpression(e.id);
+                      }}
+                      className="text-text-muted hover:text-red-400 flex-shrink-0"
                       title="Delete expression"
                     >
                       <Trash2 size={12} />
