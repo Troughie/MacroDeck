@@ -52,7 +52,7 @@ function VolumeOSD({ notif, onDismiss }: { notif: NotifData; onDismiss: (id: str
       exit={{ opacity: 0, scale: 0.8, transition: { duration: 0.15 } }}
       transition={{ type: 'spring', stiffness: 400, damping: 25 }}
       style={{
-        position: 'absolute',
+        position: 'fixed',
         top: '50%',
         left: '50%',
         transform: 'translate(-50%, -50%)',
@@ -63,7 +63,8 @@ function VolumeOSD({ notif, onDismiss }: { notif: NotifData; onDismiss: (id: str
         borderRadius: 12,
         padding: '24px 28px',
         boxShadow: '0 12px 48px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.05)',
-        pointerEvents: 'auto',
+        pointerEvents: 'none',
+        zIndex: 9999,
       }}
     >
       {/* Icon */}
@@ -362,27 +363,33 @@ export function NotificationApp() {
   }, [dismiss]);
 
   return (
-    <div style={{
-      position: 'fixed',
-      bottom: 12,
-      right: 12,
-      left: 12,
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 8,
-      pointerEvents: 'none',
-    }}>
-      <AnimatePresence mode="popLayout">
-        {notifs.map(n => (
-          <div key={n.id} style={{ pointerEvents: 'auto' }}>
-            {n.type === 'volume' ? (
-              <VolumeOSD notif={n} onDismiss={dismiss} />
-            ) : (
+    <>
+      {/* Regular notifications - bottom right */}
+      <div style={{
+        position: 'fixed',
+        bottom: 12,
+        right: 12,
+        left: 12,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        pointerEvents: 'none',
+      }}>
+        <AnimatePresence mode="popLayout">
+          {notifs.filter(n => n.type !== 'volume').map(n => (
+            <div key={n.id} style={{ pointerEvents: 'auto' }}>
               <NotifItem notif={n} onDismiss={dismiss} />
-            )}
-          </div>
+            </div>
+          ))}
+        </AnimatePresence>
+      </div>
+
+      {/* Volume OSD - center screen */}
+      <AnimatePresence>
+        {notifs.filter(n => n.type === 'volume').map(n => (
+          <VolumeOSD key={n.id} notif={n} onDismiss={dismiss} />
         ))}
       </AnimatePresence>
-    </div>
+    </>
   );
 }
