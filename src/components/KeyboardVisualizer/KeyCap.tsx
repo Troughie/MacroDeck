@@ -247,6 +247,7 @@ export const KeyCap = React.forwardRef<HTMLDivElement, KeyCapProps>(
                 ? '2px dashed rgba(245, 158, 11, 0.8)'
                 : '2px dashed rgba(45, 212, 191, 0.8)',
               pointerEvents: 'none',
+              animation: 'pulse 1.5s ease-in-out infinite',
             }}
           />
         )}
