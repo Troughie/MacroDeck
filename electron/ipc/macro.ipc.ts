@@ -200,22 +200,39 @@ async function executeMultimedia(settings: MultimediaSettings): Promise<void> {
 }
 
 async function executeMuteToggle(settings: MuteSettings): Promise<void> {
-  try {
-    await runAppVolume(['toggle-mute', settings.target]);
-    return;
-  } catch (err: any) {
-    console.error('[macro.ipc] AppVolume mute failed:', err.message?.slice(0, 100));
-  }
-
-  // Fallback for master: VK_VOLUME_MUTE
+  // For master volume: always use VK_VOLUME_MUTE to trigger Windows native OSD
   if (settings.target === 'master') {
     await sendVirtualKey(0xAD);
+    return;
+  }
+
+  // For app-specific mute: use AppVolume
+  try {
+    await runAppVolume(['toggle-mute', settings.target]);
+  } catch (err: any) {
+    console.error('[macro.ipc] AppVolume mute failed:', err.message?.slice(0, 100));
   }
 }
 
 async function executeVolumeAdjust(
   settings: VolumeSettings
 ): Promise<{ currentValue: number; previousValue: number } | null> {
+  // For master volume: always use VK keys to trigger Windows native OSD
+  if (settings.target === 'master') {
+    const steps = Math.max(1, Math.round(settings.delta / 2));
+    const vk = settings.mode === 'increase' ? 0xAF : settings.mode === 'decrease' ? 0xAE : null;
+
+    if (vk) {
+      for (let i = 0; i < steps; i++) {
+        await sendVirtualKey(vk);
+        await new Promise(r => setTimeout(r, 20));
+      }
+    }
+    // Windows OSD shows natively, no custom notification needed
+    return null;
+  }
+
+  // For app-specific volume: use AppVolume (no native OSD, we show custom notification)
   try {
     let out: string;
     if (settings.mode === 'set' && settings.setValue !== undefined) {
@@ -231,18 +248,8 @@ async function executeVolumeAdjust(
     return JSON.parse(out) as { currentValue: number; previousValue: number };
   } catch (err: any) {
     console.error('[macro.ipc] AppVolume volume failed:', err.message?.slice(0, 100));
+    return null;
   }
-
-  // Fallback VK cho master (không có currentValue chính xác)
-  if (settings.target === 'master') {
-    const steps = Math.max(1, Math.round(settings.delta / 2));
-    const vk = settings.mode === 'increase' ? 0xAF : 0xAE;
-    for (let i = 0; i < steps; i++) {
-      await sendVirtualKey(vk);
-      await new Promise(r => setTimeout(r, 20));
-    }
-  }
-  return null; // không biết currentValue khi dùng VK fallback
 }
 
 // ─── KeyboardEvent.code → VK code mapping ────────────────────────────────────
@@ -554,19 +561,22 @@ export async function executeMacro(macro: MacroConfig): Promise<boolean> {
       case 'MUTE_TOGGLE': {
         const s = macro.settings as MuteSettings;
         await executeMuteToggle(s);
-        sendNotification({ id: genId(), type: 'info', title: `🔇 Mute toggled`, message: s.targetName, icon, duration: 2000 });
+        // Only show custom notification for app-specific mute (master uses Windows OSD)
+        if (s.target !== 'master') {
+          sendNotification({ id: genId(), type: 'info', title: `🔇 Mute toggled`, message: s.targetName, icon, duration: 2000 });
+        }
         break;
       }
 
       case 'VOLUME_ADJUST': {
         const s = macro.settings as VolumeSettings;
-        const modeIcon = s.mode === 'increase' ? '🔊' : s.mode === 'decrease' ? '🔉' : '🔊';
 
-        // Thực thi và lấy kết quả volume thực tế
+        // Execute volume adjustment
         const result = await executeVolumeAdjust(s);
 
-        if (result) {
-          // Có currentValue chính xác → hiện progress bar trong notification
+        // Only show custom notification for app-specific volume (master uses Windows OSD)
+        if (s.target !== 'master' && result) {
+          const modeIcon = s.mode === 'increase' ? '🔊' : s.mode === 'decrease' ? '🔉' : '🔊';
           const modeLabel = s.mode === 'increase'
             ? `+${s.delta}% → ${result.currentValue}%`
             : s.mode === 'decrease'
@@ -584,17 +594,6 @@ export async function executeMacro(macro: MacroConfig): Promise<boolean> {
             previousValue: result.previousValue,
             maxValue: 100,
             unit: '%',
-          });
-        } else {
-          // Fallback: không có data thực → hiển thị label tĩnh như cũ
-          const modeLabel = s.mode === 'increase' ? `+${s.delta}%` : s.mode === 'decrease' ? `-${s.delta}%` : `${s.setValue ?? 0}%`;
-          sendNotification({
-            id: genId(),
-            type: 'info',
-            title: `${modeIcon} Volume ${modeLabel}`,
-            message: s.targetName,
-            icon,
-            duration: 2000,
           });
         }
         break;
