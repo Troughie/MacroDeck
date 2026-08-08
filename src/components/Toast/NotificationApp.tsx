@@ -4,7 +4,7 @@ import { CheckCircle2, AlertCircle, Info, Loader2, X } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type ToastType = 'success' | 'loading' | 'error' | 'info';
+type ToastType = 'success' | 'loading' | 'error' | 'info' | 'volume';
 
 interface NotifData {
   id: string;
@@ -26,7 +26,96 @@ const TYPE_CONFIG = {
   error: { accent: '#ef4444', border: 'rgba(239,68,68,0.3)', icon: <AlertCircle size={16} style={{ color: '#ef4444' }} /> },
   info: { accent: '#3b82f6', border: 'rgba(59,130,246,0.3)', icon: <Info size={16} style={{ color: '#60a5fa' }} /> },
   loading: { accent: '#3b82f6', border: 'rgba(59,130,246,0.3)', icon: <Loader2 size={16} style={{ color: '#60a5fa' }} className="animate-spin" /> },
+  volume: { accent: '#f8f8f8', border: 'rgba(248,248,248,0.15)', icon: null },
 };
+
+// ─── Windows OSD style volume notification ───────────────────────────────────
+
+function VolumeOSD({ notif, onDismiss }: { notif: NotifData; onDismiss: (id: string) => void }) {
+  const { currentValue = 0, maxValue = 100 } = notif;
+  const pct = Math.round((currentValue / maxValue) * 100);
+  const isMuted = currentValue === 0;
+
+  useEffect(() => {
+    if (!notif.duration || notif.duration === 0) return;
+    const timer = setTimeout(() => onDismiss(notif.id), notif.duration);
+    return () => clearTimeout(timer);
+  }, [notif.duration, notif.id, onDismiss]);
+
+  // Volume icon based on level
+  const volumeIcon = isMuted ? '🔇' : pct > 66 ? '🔊' : pct > 33 ? '🔉' : '🔈';
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.8 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.8, transition: { duration: 0.15 } }}
+      transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+      style={{
+        position: 'absolute',
+        top: '50%',
+        left: '50%',
+        transform: 'translate(-50%, -50%)',
+        width: 280,
+        background: 'rgba(30, 30, 30, 0.95)',
+        backdropFilter: 'blur(40px)',
+        border: '1px solid rgba(255,255,255,0.1)',
+        borderRadius: 12,
+        padding: '24px 28px',
+        boxShadow: '0 12px 48px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.05)',
+        pointerEvents: 'auto',
+      }}
+    >
+      {/* Icon */}
+      <div style={{ textAlign: 'center', fontSize: 48, marginBottom: 16 }}>
+        {volumeIcon}
+      </div>
+
+      {/* App name */}
+      {notif.message && (
+        <div style={{
+          textAlign: 'center',
+          color: '#e5e7eb',
+          fontSize: 13,
+          fontWeight: 500,
+          marginBottom: 18,
+        }}>
+          {notif.message}
+        </div>
+      )}
+
+      {/* Volume bar */}
+      <div style={{
+        height: 6,
+        background: 'rgba(255,255,255,0.15)',
+        borderRadius: 3,
+        overflow: 'hidden',
+        marginBottom: 12,
+      }}>
+        <motion.div
+          initial={{ width: `${Math.round(((notif.previousValue ?? currentValue) / maxValue) * 100)}%` }}
+          animate={{ width: `${pct}%` }}
+          transition={{ duration: 0.3, ease: 'easeOut' }}
+          style={{
+            height: '100%',
+            background: isMuted ? '#6b7280' : '#f8f8f8',
+            borderRadius: 3,
+          }}
+        />
+      </div>
+
+      {/* Percentage */}
+      <div style={{
+        textAlign: 'center',
+        color: isMuted ? '#9ca3af' : '#f8f8f8',
+        fontSize: 16,
+        fontWeight: 600,
+      }}>
+        {currentValue}%
+      </div>
+    </motion.div>
+  );
+}
 
 // ─── Value bar (thanh giá trị hiện tại) ──────────────────────────────────────
 
@@ -286,7 +375,11 @@ export function NotificationApp() {
       <AnimatePresence mode="popLayout">
         {notifs.map(n => (
           <div key={n.id} style={{ pointerEvents: 'auto' }}>
-            <NotifItem notif={n} onDismiss={dismiss} />
+            {n.type === 'volume' ? (
+              <VolumeOSD notif={n} onDismiss={dismiss} />
+            ) : (
+              <NotifItem notif={n} onDismiss={dismiss} />
+            )}
           </div>
         ))}
       </AnimatePresence>

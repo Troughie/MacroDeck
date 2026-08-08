@@ -576,20 +576,13 @@ export async function executeMacro(macro: MacroConfig): Promise<boolean> {
 
         // Only show custom notification for app-specific volume (master uses Windows OSD)
         if (s.target !== 'master' && result) {
-          const modeIcon = s.mode === 'increase' ? '🔊' : s.mode === 'decrease' ? '🔉' : '🔊';
-          const modeLabel = s.mode === 'increase'
-            ? `+${s.delta}% → ${result.currentValue}%`
-            : s.mode === 'decrease'
-              ? `-${s.delta}% → ${result.currentValue}%`
-              : `${result.currentValue}%`;
-
           sendNotification({
             id: genId(),
-            type: 'info',
-            title: `${modeIcon} Volume ${modeLabel}`,
+            type: 'volume',
+            title: s.targetName,
             message: s.targetName,
-            icon,
-            duration: 2000,
+            icon: icon ?? '🔊',
+            duration: 1500,
             currentValue: result.currentValue,
             previousValue: result.previousValue,
             maxValue: 100,
