@@ -19,7 +19,7 @@ import { electronAPI } from './lib/electron';
 
 export default function App() {
   const { loadDevices, setKeyPressed, setKeyReleased, clearKeys } = useKeyboardStore();
-  const { loadMacros, assignMacro, selectedKeyCode, getMacrosForProfile } = useMacroStore();
+  const { loadMacros, assignMacro, selectedKeyCode, selectKey, getMacrosForProfile } = useMacroStore();
   const { activeProfileId, loadProfiles } = useProfileStore();
 
   const [activeDragType, setActiveDragType] = React.useState<MacroType | null>(null);
@@ -111,6 +111,47 @@ export default function App() {
     }
   }, [assignMacro, activeProfileId]);
 
+  const handleFileDrop = useCallback(async (keyCode: string, filePath: string) => {
+    if (!electronAPI) return;
+
+    const resolved = await electronAPI.files.resolveDropped(filePath);
+
+    if (!resolved.ok) {
+      window.alert(`Could not open file: ${resolved.error ?? 'Unknown error'}`);
+      return;
+    }
+
+    // Confirm overwrite if key already has a macro
+    const existing = useMacroStore.getState().getMacrosForProfile(activeProfileId)[keyCode];
+    if (existing) {
+      const proceed = window.confirm(
+        `Key already has macro "${existing.displayName}". Replace it?`
+      );
+      if (!proceed) return;
+    }
+
+    // Build launch args for folder
+    const launchArgs = resolved.fileType === 'folder' ? filePath : undefined;
+
+    assignMacro(keyCode, 'APP_LAUNCH', activeProfileId);
+
+    // updateMacro needs to run after assignMacro sets the key
+    const { updateMacro } = useMacroStore.getState();
+    updateMacro(activeProfileId, keyCode, {
+      displayName: resolved.appName,
+      iconEmoji: resolved.iconDataUrl ?? undefined,
+      settings: {
+        displayName: resolved.appName,
+        exePath: resolved.exePath,
+        appName: resolved.appName,
+        iconDataUrl: resolved.iconDataUrl ?? undefined,
+        ...(launchArgs ? { args: launchArgs } : {}),
+      } as any,
+    });
+
+    selectKey(keyCode);
+  }, [activeProfileId, assignMacro]);
+
   const activeDragInfo = activeDragType
     ? MACRO_TYPE_INFO.find(m => m.type === activeDragType)
     : null;
@@ -135,7 +176,7 @@ export default function App() {
           </div>
 
           <div className="flex-1 flex flex-col overflow-hidden gap-2 min-w-0">
-            <KeyboardVisualizer />
+            <KeyboardVisualizer onFileDrop={handleFileDrop} />
 
             <AnimatePresence>
               {selectedKeyCode && (
