@@ -104,6 +104,7 @@ export const KeyCap = React.forwardRef<HTMLDivElement, KeyCapProps>(
     return (
       <div
         ref={ref}
+        data-keycode={keyDef.code}
         onClick={onClick}
         onDragOver={handleDragOver}
         onDrop={handleDrop}

@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { useKeyboardStore } from '../../stores/keyboardStore';
 import { useMacroStore } from '../../stores/macroStore';
@@ -6,16 +6,67 @@ import { useProfileStore } from '../../stores/profileStore';
 import { KeyCap } from './KeyCap';
 import { KEYBOARD_LAYOUT, KeyDef } from './keyboardLayout';
 
-export function KeyboardVisualizer() {
+interface KeyboardVisualizerProps {
+  onFileDrop: (keyCode: string, filePath: string) => void;
+}
+
+export function KeyboardVisualizer({ onFileDrop }: KeyboardVisualizerProps) {
   const { pressedKeys } = useKeyboardStore();
   const { getMacrosForProfile, selectedKeyCode, selectKey } = useMacroStore();
   const { activeProfileId } = useProfileStore();
+
+  const [externalDragOverKey, setExternalDragOverKey] = React.useState<string | null>(null);
 
   const macros = getMacrosForProfile(activeProfileId);
 
   const handleKeyClick = useCallback((keyCode: string) => {
     selectKey(selectedKeyCode === keyCode ? null : keyCode);
   }, [selectedKeyCode, selectKey]);
+
+  // Track external file drag over keys
+  useEffect(() => {
+    const handleDragOver = (e: DragEvent) => {
+      if (!e.dataTransfer?.types.includes('Files')) return;
+      e.preventDefault();
+
+      const element = document.elementFromPoint(e.clientX, e.clientY);
+      const keyElement = element?.closest('[data-keycode]') as HTMLElement | null;
+
+      if (keyElement) {
+        const keyCode = keyElement.dataset.keycode;
+        setExternalDragOverKey(keyCode || null);
+      } else {
+        setExternalDragOverKey(null);
+      }
+    };
+
+    const handleDragLeave = (e: DragEvent) => {
+      if (e.relatedTarget === null) {
+        setExternalDragOverKey(null);
+      }
+    };
+
+    const handleDrop = () => {
+      setExternalDragOverKey(null);
+    };
+
+    const handleDragEnter = (e: DragEvent) => {
+      if (!e.dataTransfer?.types.includes('Files')) return;
+      e.preventDefault();
+    };
+
+    window.addEventListener('dragover', handleDragOver);
+    window.addEventListener('dragleave', handleDragLeave);
+    window.addEventListener('drop', handleDrop);
+    window.addEventListener('dragenter', handleDragEnter);
+
+    return () => {
+      window.removeEventListener('dragover', handleDragOver);
+      window.removeEventListener('dragleave', handleDragLeave);
+      window.removeEventListener('drop', handleDrop);
+      window.removeEventListener('dragenter', handleDragEnter);
+    };
+  }, []);
 
   return (
     <div className="panel flex-1 flex flex-col overflow-hidden">
@@ -43,6 +94,8 @@ export function KeyboardVisualizer() {
                   macroName={macros[keyDef.code]?.displayName}
                   macroIcon={macros[keyDef.code]?.iconEmoji}
                   onClick={() => handleKeyClick(keyDef.code)}
+                  externalDragOverKey={externalDragOverKey}
+                  onFileDrop={onFileDrop}
                 />
               ))}
             </div>
@@ -82,13 +135,32 @@ interface KeyCapWrapperProps {
   macroName?: string;
   macroIcon?: string;
   onClick: () => void;
+  externalDragOverKey: string | null;
+  onFileDrop: (keyCode: string, filePath: string) => void;
 }
 
-function KeyCapWrapper({ keyDef, isPressed, isSelected, hasMacro, macroName, macroIcon, onClick }: KeyCapWrapperProps) {
+function KeyCapWrapper({
+  keyDef,
+  isPressed,
+  isSelected,
+  hasMacro,
+  macroName,
+  macroIcon,
+  onClick,
+  externalDragOverKey,
+  onFileDrop
+}: KeyCapWrapperProps) {
   const { setNodeRef, isOver } = useDroppable({
     id: `key-${keyDef.code}`,
     data: { keyCode: keyDef.code },
   });
+
+  const isExternalDropTarget = externalDragOverKey === keyDef.code;
+  const isExternalDropOverwrite = isExternalDropTarget && hasMacro;
+
+  const handleFileDrop = useCallback((filePath: string) => {
+    onFileDrop(keyDef.code, filePath);
+  }, [keyDef.code, onFileDrop]);
 
   return (
     <KeyCap
@@ -100,6 +172,9 @@ function KeyCapWrapper({ keyDef, isPressed, isSelected, hasMacro, macroName, mac
       macroName={macroName}
       macroIcon={macroIcon}
       isDropTarget={isOver}
+      isExternalDropTarget={isExternalDropTarget}
+      isExternalDropOverwrite={isExternalDropOverwrite}
+      onFileDrop={handleFileDrop}
       onClick={onClick}
     />
   );
