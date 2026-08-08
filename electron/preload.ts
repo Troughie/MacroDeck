@@ -9,6 +9,7 @@ import type {
   AeSavedScript,
   AeSavedExpression,
 } from '../src/types/macro.types';
+import type { ResolvedFile } from './ipc/files.ipc';
 
 // ─── Type-safe IPC Bridge ─────────────────────────────────────────────────────
 
@@ -78,6 +79,12 @@ const electronAPI = {
       ipcRenderer.invoke('ae:uninstall'),
     panelStatus: (): Promise<{ installed: boolean; alive: boolean; aeVersion?: string }> =>
       ipcRenderer.invoke('ae:panel-status'),
+  },
+
+  // ── Files (drag-drop resolution) ──────────────────────────────────────────
+  files: {
+    resolveDropped: (filePath: string): Promise<ResolvedFile> =>
+      ipcRenderer.invoke('files:resolveDropped', filePath),
   },
 
   // ── Store ─────────────────────────────────────────────────────────────────
@@ -155,7 +162,7 @@ const electronAPI = {
   // ── Internal IPC (for notification window mouse events) ──────────────────
   _ipc: {
     send: (channel: string, ...args: any[]) => {
-      const allowed = ['notif:set-interactive'];
+      const allowed = ['notif:set-interactive', 'notif:empty'];
       if (allowed.includes(channel)) ipcRenderer.send(channel, ...args);
     },
   },
