@@ -38,8 +38,14 @@ export function createNotificationWindow(): BrowserWindow {
     notifWindow.loadFile(path.join(__dirname, '../../renderer/notification.html'));
   }
 
+  // Do NOT show here. A transparent, always-on-top window is continuously
+  // re-composited by the GPU for as long as it is visible — keeping it shown
+  // 24/7 (even empty) burned idle CPU/GPU. Instead the window stays hidden until
+  // sendNotification() shows it, and the renderer hides it again once its queue
+  // empties (see the 'notif:empty' handler below). ready-to-show is still needed
+  // so the first sendNotification() doesn't race an unloaded renderer.
   notifWindow.once('ready-to-show', () => {
-    notifWindow?.show();
+    /* stay hidden until a notification actually arrives */
   });
 
   notifWindow.on('closed', () => {
@@ -67,6 +73,13 @@ export function registerNotificationIpc(): void {
       notifWindow.setIgnoreMouseEvents(true, { forward: false });
     }
   });
+
+  // The renderer fires this once its notification queue is empty. Hiding the
+  // window removes it from the compositor so an idle app isn't paying to
+  // re-blend an empty transparent overlay every frame.
+  ipcMain.on('notif:empty', () => {
+    notifWindow?.hide();
+  });
 }
 
 export function sendNotification(data: {
@@ -81,7 +94,13 @@ export function sendNotification(data: {
   unit?: string;
   maxValue?: number;
 }): void {
-  notifWindow?.webContents.send('notif:show', data);
+  if (!notifWindow) return;
+  // showInactive: bring the overlay up to display the notification WITHOUT
+  // stealing focus from whatever the user is doing (the window is focusable:false
+  // anyway). The renderer hides it again via 'notif:empty' when the last
+  // notification is dismissed, so it isn't composited while idle.
+  if (!notifWindow.isVisible()) notifWindow.showInactive();
+  notifWindow.webContents.send('notif:show', data);
 }
 
 export function dismissNotification(id: string): void {

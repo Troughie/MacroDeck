@@ -695,6 +695,34 @@ let storeRef: Store<StoreSchema> | null = null;
 
 async function executeProfileSwitch(settings: ProfileSwitchSettings): Promise<void> {
   if (!mainWindowRef || mainWindowRef.isDestroyed()) return;
+  if (!storeRef) return;
+
+  // Get all profiles to determine target profile name
+  const profiles = storeRef.get('profiles', []);
+  const activeProfileId = storeRef.get('activeProfileId', 'default');
+
+  let targetProfile;
+  if (settings.mode === 'specific' && settings.targetProfileId) {
+    targetProfile = profiles.find(p => p.id === settings.targetProfileId);
+  } else if (settings.mode === 'next') {
+    const idx = profiles.findIndex(p => p.id === activeProfileId);
+    targetProfile = profiles[(idx + 1) % profiles.length];
+  } else if (settings.mode === 'prev') {
+    const idx = profiles.findIndex(p => p.id === activeProfileId);
+    targetProfile = profiles[(idx - 1 + profiles.length) % profiles.length];
+  }
+
+  // Send notification with target profile name
+  if (targetProfile) {
+    sendNotification({
+      id: genId(),
+      type: 'success',
+      title: `Switched to ${targetProfile.name}`,
+      icon: '🔄',
+      duration: 2000,
+    });
+  }
+
   // Send event to renderer — renderer handles the actual profile switch
   mainWindowRef.webContents.send('profile:switch', {
     mode: settings.mode,

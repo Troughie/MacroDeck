@@ -111,12 +111,31 @@
   -webkit-app-region: no-drag;
 }
 
-/* Glow animations */
+/* Glow animations
+ *
+ * IMPORTANT: animate `opacity` on a pseudo-element, NOT `box-shadow` on the node
+ * itself. box-shadow can't be GPU-composited, so an `infinite` box-shadow
+ * animation forces a full CPU repaint every frame — and because the main window
+ * runs with `backgroundThrottling:false` (needed so macros keep firing while the
+ * app is hidden in the tray), that repaint loop never stops even when minimized.
+ * That was a primary cause of the ~4-8% idle CPU. Animating opacity runs on the
+ * compositor thread, leaving the renderer idle. */
 @keyframes glow-pulse {
-  0%, 100% { box-shadow: 0 0 8px rgba(59, 130, 246, 0.4); }
-  50% { box-shadow: 0 0 20px rgba(59, 130, 246, 0.8); }
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
 }
 
 .glow-animate {
+  position: relative;
+}
+
+.glow-animate::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: inherit;
+  box-shadow: 0 0 14px rgba(59, 130, 246, 0.7);
   animation: glow-pulse 2s ease-in-out infinite;
+  will-change: opacity;
+  pointer-events: none;
 }

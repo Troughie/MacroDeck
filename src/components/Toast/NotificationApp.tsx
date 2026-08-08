@@ -230,6 +230,16 @@ export function NotificationApp() {
     setNotifs(prev => prev.filter(n => n.id !== id));
   }, []);
 
+  // Once the queue empties, tell the main process to hide the overlay window.
+  // The window is transparent + always-on-top, so leaving it visible while empty
+  // keeps the GPU compositing it every frame for nothing. sendNotification()
+  // shows it again (showInactive) when the next notification arrives.
+  useEffect(() => {
+    if (notifs.length === 0) {
+      (window as any).electronAPI?._ipc?.send?.('notif:empty');
+    }
+  }, [notifs.length]);
+
   useEffect(() => {
     if (!window.electronAPI) return;
 
