@@ -696,7 +696,7 @@ async function executeProfileSwitch(settings: ProfileSwitchSettings): Promise<vo
   if (!mainWindowRef || mainWindowRef.isDestroyed()) return;
   if (!storeRef) return;
 
-  // Get all profiles to determine target profile name
+  // Get all profiles to determine target profile name BEFORE switch
   const profiles = storeRef.get('profiles', []);
   const activeProfileId = storeRef.get('activeProfileId', 'default');
 
@@ -711,6 +711,12 @@ async function executeProfileSwitch(settings: ProfileSwitchSettings): Promise<vo
     targetProfile = profiles[(idx - 1 + profiles.length) % profiles.length];
   }
 
+  // Send event to renderer — renderer handles the actual profile switch
+  mainWindowRef.webContents.send('profile:switch', {
+    mode: settings.mode,
+    targetProfileId: settings.targetProfileId,
+  });
+
   // Send notification with target profile name
   if (targetProfile) {
     sendNotification({
@@ -721,12 +727,6 @@ async function executeProfileSwitch(settings: ProfileSwitchSettings): Promise<vo
       duration: 2000,
     });
   }
-
-  // Send event to renderer — renderer handles the actual profile switch
-  mainWindowRef.webContents.send('profile:switch', {
-    mode: settings.mode,
-    targetProfileId: settings.targetProfileId,
-  });
 }
 
 export function registerMacroIpc(store: Store<StoreSchema>, mainWindow: import('electron').BrowserWindow | null): void {
