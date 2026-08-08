@@ -84,7 +84,7 @@ export function registerNotificationIpc(): void {
 
 export function sendNotification(data: {
   id: string;
-  type: 'success' | 'loading' | 'error' | 'info';
+  type: 'success' | 'loading' | 'error' | 'info' | 'volume';
   title: string;
   message?: string;
   icon?: string;
