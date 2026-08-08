@@ -53,9 +53,9 @@ function VolumeOSD({ notif, onDismiss }: { notif: NotifData; onDismiss: (id: str
       transition={{ type: 'spring', stiffness: 400, damping: 25 }}
       style={{
         position: 'fixed',
-        top: '50%',
+        bottom: '15%',
         left: '50%',
-        transform: 'translate(-50%, -50%)',
+        transform: 'translateX(-50%)',
         background: 'rgba(30, 30, 30, 0.95)',
         backdropFilter: 'blur(40px)',
         border: '1px solid rgba(255,255,255,0.1)',
