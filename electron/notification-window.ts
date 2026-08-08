@@ -8,10 +8,10 @@ export function createNotificationWindow(): BrowserWindow {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
 
   notifWindow = new BrowserWindow({
-    width: 380,
-    height: 600,
-    x: width - 390,
-    y: height - 610,
+    width: width,
+    height: height,
+    x: 0,
+    y: 0,
     frame: false,
     transparent: true,
     alwaysOnTop: true,

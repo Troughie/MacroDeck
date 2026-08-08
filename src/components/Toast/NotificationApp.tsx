@@ -56,63 +56,69 @@ function VolumeOSD({ notif, onDismiss }: { notif: NotifData; onDismiss: (id: str
         top: '50%',
         left: '50%',
         transform: 'translate(-50%, -50%)',
-        width: 280,
         background: 'rgba(30, 30, 30, 0.95)',
         backdropFilter: 'blur(40px)',
         border: '1px solid rgba(255,255,255,0.1)',
-        borderRadius: 12,
-        padding: '24px 28px',
+        borderRadius: 10,
+        padding: '16px 24px',
         boxShadow: '0 12px 48px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.05)',
         pointerEvents: 'none',
         zIndex: 9999,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 20,
+        minWidth: 320,
       }}
     >
       {/* Icon */}
-      <div style={{ textAlign: 'center', fontSize: 48, marginBottom: 16 }}>
+      <div style={{ fontSize: 36, flexShrink: 0 }}>
         {volumeIcon}
       </div>
 
-      {/* App name */}
-      {notif.message && (
+      {/* Volume bar + text */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {/* App name */}
+        {notif.message && (
+          <div style={{
+            color: '#9ca3af',
+            fontSize: 11,
+            fontWeight: 500,
+            marginBottom: 8,
+            textAlign: 'center',
+          }}>
+            {notif.message}
+          </div>
+        )}
+
+        {/* Volume bar */}
+        <div style={{
+          height: 6,
+          background: 'rgba(255,255,255,0.15)',
+          borderRadius: 3,
+          overflow: 'hidden',
+          marginBottom: 8,
+        }}>
+          <motion.div
+            initial={{ width: `${Math.round(((notif.previousValue ?? currentValue) / maxValue) * 100)}%` }}
+            animate={{ width: `${pct}%` }}
+            transition={{ duration: 0.3, ease: 'easeOut' }}
+            style={{
+              height: '100%',
+              background: isMuted ? '#6b7280' : '#f8f8f8',
+              borderRadius: 3,
+            }}
+          />
+        </div>
+
+        {/* Percentage */}
         <div style={{
           textAlign: 'center',
-          color: '#e5e7eb',
+          color: isMuted ? '#9ca3af' : '#f8f8f8',
           fontSize: 13,
-          fontWeight: 500,
-          marginBottom: 18,
+          fontWeight: 600,
         }}>
-          {notif.message}
+          {currentValue}%
         </div>
-      )}
-
-      {/* Volume bar */}
-      <div style={{
-        height: 6,
-        background: 'rgba(255,255,255,0.15)',
-        borderRadius: 3,
-        overflow: 'hidden',
-        marginBottom: 12,
-      }}>
-        <motion.div
-          initial={{ width: `${Math.round(((notif.previousValue ?? currentValue) / maxValue) * 100)}%` }}
-          animate={{ width: `${pct}%` }}
-          transition={{ duration: 0.3, ease: 'easeOut' }}
-          style={{
-            height: '100%',
-            background: isMuted ? '#6b7280' : '#f8f8f8',
-            borderRadius: 3,
-          }}
-        />
-      </div>
-
-      {/* Percentage */}
-      <div style={{
-        textAlign: 'center',
-        color: isMuted ? '#9ca3af' : '#f8f8f8',
-        fontSize: 16,
-        fontWeight: 600,
-      }}>
-        {currentValue}%
       </div>
     </motion.div>
   );
