@@ -25,6 +25,8 @@ export interface AppLaunchSettings extends BaseSettings {
   exePath: string;
   appName: string;
   iconPath?: string;
+  iconDataUrl?: string;
+  args?: string;  // optional launch argument (e.g. folder path for explorer.exe)
 }
 
 export interface WebLinkSettings extends BaseSettings {

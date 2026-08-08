@@ -142,14 +142,22 @@ Start-Sleep -Milliseconds 30
 
 async function executeAppLaunch(settings: AppLaunchSettings): Promise<void> {
   if (!settings.exePath) throw new Error('No exe path specified');
-  if (!fs.existsSync(settings.exePath)) throw new Error(`App not found: ${settings.exePath}`);
 
-  // Use spawn with detached=true so it works even when app is in background/tray
-  const { spawn } = require('child_process');
-  const child = spawn(settings.exePath, [], {
+  // For folder macros: exePath is 'explorer.exe' (always on PATH), no existence check needed.
+  const isExplorer = settings.exePath.toLowerCase() === 'explorer.exe';
+  if (!isExplorer && !fs.existsSync(settings.exePath)) {
+    throw new Error(`App not found: ${settings.exePath}`);
+  }
+
+  const args = settings.args ? [settings.args] : [];
+  const cwd = isExplorer
+    ? undefined
+    : require('path').dirname(settings.exePath);
+
+  const child = spawn(settings.exePath, args, {
     detached: true,
     stdio: 'ignore',
-    cwd: require('path').dirname(settings.exePath),
+    ...(cwd ? { cwd } : {}),
   });
   child.unref();
 }
