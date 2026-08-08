@@ -9,6 +9,7 @@ import { registerAudioIpc } from './ipc/audio.ipc';
 import { registerMacroIpc } from './ipc/macro.ipc';
 import { registerSystemIpc, setWindowsStartup } from './ipc/system.ipc';
 import { registerAeIpc } from './ipc/ae.ipc';
+import { registerFilesIpc } from './ipc/files.ipc';
 import { writeLibrary, writeExpressions } from './ipc/ae-bridge';
 import { compileExpression } from '../src/components/MacroSettings/ae/compileExpression';
 import { buildExportBundle, parseImportBundle } from './ipc/settings-transfer';
@@ -347,6 +348,7 @@ app.whenReady().then(() => {
   registerMacroIpc(store, mainWindow);
   registerSystemIpc(store, mainWindow, updateTrayMenu);
   registerAeIpc();
+  registerFilesIpc();
   registerNotificationIpc();
 
   // Seed the AE panel's library.json so it has data even if the user changes
