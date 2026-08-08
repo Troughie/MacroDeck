@@ -12,12 +12,15 @@ interface KeyCapProps {
   macroName?: string;
   macroIcon?: string;  // emoji icon
   isDropTarget: boolean;
+  isExternalDropTarget: boolean;  // OS file drag hovering over this key
+  isExternalDropOverwrite: boolean; // key already has a macro (amber warning)
+  onFileDrop: (filePath: string) => void;
   onClick: () => void;
 }
 
 // Use forwardRef so KeyCapWrapper can pass setNodeRef directly
 export const KeyCap = React.forwardRef<HTMLDivElement, KeyCapProps>(
-  function KeyCap({ keyDef, isPressed, isSelected, hasMacro, macroName, macroIcon, isDropTarget, onClick }, ref) {
+  function KeyCap({ keyDef, isPressed, isSelected, hasMacro, macroName, macroIcon, isDropTarget, isExternalDropTarget, isExternalDropOverwrite, onFileDrop, onClick }, ref) {
     // Gap keys — invisible spacers (no ref needed)
     if (!isInteractiveKey(keyDef.code)) {
       return (
@@ -34,8 +37,27 @@ export const KeyCap = React.forwardRef<HTMLDivElement, KeyCapProps>(
     const width = keyDef.width * KEY_UNIT + (keyDef.width - 1) * KEY_GAP;
     const height = (keyDef.height || 1) * KEY_UNIT;
 
+    const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+      if (!e.dataTransfer.types.includes('Files')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'copy';
+    };
+
+    const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+      if (!e.dataTransfer.types.includes('Files')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const file = e.dataTransfer.files[0];
+      if (file) onFileDrop((file as any).path);
+    };
+
     const bgColor = isPressed
       ? '#1d4ed8'
+      : isExternalDropOverwrite
+      ? '#451a03'
+      : isExternalDropTarget
+      ? '#042f2e'
       : isDropTarget
       ? '#1e3a5f'
       : isSelected
@@ -46,6 +68,10 @@ export const KeyCap = React.forwardRef<HTMLDivElement, KeyCapProps>(
 
     const borderColor = isPressed
       ? '#3b82f6'
+      : isExternalDropOverwrite
+      ? '#f59e0b'
+      : isExternalDropTarget
+      ? '#2dd4bf'
       : isDropTarget
       ? '#60a5fa'
       : isSelected
@@ -63,7 +89,11 @@ export const KeyCap = React.forwardRef<HTMLDivElement, KeyCapProps>(
       : '#94a3b8';
 
     // Use CSS transitions instead of framer-motion scale to avoid hitbox offset
-    const boxShadow = isDropTarget
+    const boxShadow = isExternalDropOverwrite
+      ? '0 0 20px rgba(245, 158, 11, 0.9)'
+      : isExternalDropTarget
+      ? '0 0 20px rgba(45, 212, 191, 0.9)'
+      : isDropTarget
       ? '0 0 20px rgba(59, 130, 246, 0.9)'
       : isPressed
       ? '0 0 16px rgba(59, 130, 246, 0.7)'
@@ -75,6 +105,8 @@ export const KeyCap = React.forwardRef<HTMLDivElement, KeyCapProps>(
       <div
         ref={ref}
         onClick={onClick}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
         style={{
           width,
           height,
@@ -186,7 +218,7 @@ export const KeyCap = React.forwardRef<HTMLDivElement, KeyCapProps>(
           </span>
         )}
 
-        {/* Drop target highlight */}
+        {/* Drop target highlight — internal dnd-kit */}
         {isDropTarget && (
           <div
             style={{
@@ -195,6 +227,24 @@ export const KeyCap = React.forwardRef<HTMLDivElement, KeyCapProps>(
               borderRadius: 5,
               background: 'rgba(59, 130, 246, 0.15)',
               border: '2px dashed rgba(59, 130, 246, 0.8)',
+              pointerEvents: 'none',
+            }}
+          />
+        )}
+
+        {/* Drop target highlight — external OS files */}
+        {isExternalDropTarget && (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              borderRadius: 5,
+              background: isExternalDropOverwrite
+                ? 'rgba(245, 158, 11, 0.15)'
+                : 'rgba(45, 212, 191, 0.15)',
+              border: isExternalDropOverwrite
+                ? '2px dashed rgba(245, 158, 11, 0.8)'
+                : '2px dashed rgba(45, 212, 191, 0.8)',
               pointerEvents: 'none',
             }}
           />
