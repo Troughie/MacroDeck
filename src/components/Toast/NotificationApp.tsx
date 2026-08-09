@@ -46,21 +46,17 @@ function VolumeOSD({ notif, onDismiss }: { notif: NotifData; onDismiss: (id: str
   const volumeIcon = isMuted ? '🔇' : pct > 66 ? '🔊' : pct > 33 ? '🔉' : '🔈';
 
   return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.8 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.8, transition: { duration: 0.15 } }}
-      transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+    <div
       style={{
         position: 'fixed',
-        bottom: '15%',
+        bottom: '1%',
         left: '50%',
         transform: 'translateX(-50%)',
         background: 'rgba(30, 30, 30, 0.95)',
         backdropFilter: 'blur(40px)',
         border: '1px solid rgba(255,255,255,0.1)',
         borderRadius: 10,
-        padding: '16px 24px',
+        padding: '8px 8px',
         boxShadow: '0 12px 48px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.05)',
         pointerEvents: 'none',
         zIndex: 9999,
@@ -71,7 +67,7 @@ function VolumeOSD({ notif, onDismiss }: { notif: NotifData; onDismiss: (id: str
       }}
     >
       {/* Icon */}
-      <div style={{ fontSize: 36, flexShrink: 0 }}>
+      <div style={{ fontSize: 24, flexShrink: 0 }}>
         {volumeIcon}
       </div>
 
@@ -92,11 +88,11 @@ function VolumeOSD({ notif, onDismiss }: { notif: NotifData; onDismiss: (id: str
 
         {/* Volume bar */}
         <div style={{
-          height: 6,
+          height: 3,
           background: 'rgba(255,255,255,0.15)',
           borderRadius: 3,
           overflow: 'hidden',
-          marginBottom: 8,
+          marginBottom: 4,
         }}>
           <motion.div
             initial={{ width: `${Math.round(((notif.previousValue ?? currentValue) / maxValue) * 100)}%` }}
@@ -117,10 +113,10 @@ function VolumeOSD({ notif, onDismiss }: { notif: NotifData; onDismiss: (id: str
           fontSize: 13,
           fontWeight: 600,
         }}>
-          {currentValue}%
+          {currentValue}
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
@@ -244,6 +240,7 @@ function NotifItem({ notif, onDismiss }: { notif: NotifData; onDismiss: (id: str
         background: 'rgba(15, 15, 30, 0.92)',
         backdropFilter: 'blur(20px)',
         border: `1px solid ${cfg.border}`,
+        maxWidth: 400,
         borderRadius: 14,
         overflow: 'hidden',
         boxShadow: `0 8px 32px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04)`,
@@ -375,7 +372,6 @@ export function NotificationApp() {
         position: 'fixed',
         bottom: 12,
         right: 12,
-        left: 12,
         display: 'flex',
         flexDirection: 'column',
         gap: 8,
